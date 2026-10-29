@@ -1,0 +1,12 @@
+{
+    "name": "ArduCAM",
+    "version": "1.0.0",
+    "description": "ArduCAM Mini 2MP Plus (OV2640) SPI 摄像头驱动，vendored 自 https://github.com/ArduCAM/Arduino@066a7ea1ccae4813e9a9b9d04e55f96bb8b4039e。上游自 2022 年起未再更新，本目录只保留 OV2640 所需文件，并在 memorysaver.h 中修正了默认的 OV5642 选择。",
+    "keywords": "cam, camera, video",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ArduCAM/Arduino.git"
+    },
+    "frameworks": "arduino",
+    "platforms": "*"
+}

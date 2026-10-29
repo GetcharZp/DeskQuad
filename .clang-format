@@ -1,0 +1,17 @@
+# 基准风格
+BasedOnStyle: Microsoft
+
+# 连续赋值与枚举值的 = 纵向对齐，空行或独立注释行会断开分组
+AlignConsecutiveAssignments: Consecutive
+
+# 连续的 #define 宏体纵向对齐（含行尾注释），空行会断开分组
+AlignConsecutiveMacros: Consecutive
+
+# 命名空间内缩进一级（Microsoft 默认顶格）
+NamespaceIndentation: All
+
+# public:/private: 相对类体偏移 -4，即顶格（Microsoft 默认 -2，会缩进 2 格）
+AccessModifierOffset: -4
+
+# 类内定义的短函数保持单行，例如 bool IsPlaying() const { return _playing; }
+AllowShortFunctionsOnASingleLine: Inline

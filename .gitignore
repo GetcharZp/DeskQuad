@@ -1,0 +1,15 @@
+.idea
+.vscode/
+.DS_Store
+Thumbs.db
+*.lnk
+
+/.pio/
+/firmware/.pio/
+/firmware/.pioenvs/
+*.bin
+spiffs.bin
+idedata.json
+
+*.log
+*.tmp
