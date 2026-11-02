@@ -5,88 +5,79 @@
 namespace
 {
 
-    // EmojiBitmap 描述一个表情页使用的位图
-    struct EmojiBitmap
-    {
-        const uint8_t *data; // 位图数据，为空表示该页由 view 绘制
-        uint8_t width;
-        uint8_t height;
-        uint8_t y; // 顶部纵坐标，Logo 需要垂直居中
-    };
+    // 动画帧间隔：约 30fps。IDisplay 会跳过没有变化的图块，
+    // 因此即使静止画面也按这个节拍调用也不会产生额外 I2C 流量。
+    constexpr unsigned long kFrameMs = 33;
 
-    const EmojiBitmap kEmojiBitmaps[] = {
-        {happy, 128, 64, 0},   // Happy
-        {angry, 128, 64, 0},   // Angry
-        {error, 128, 64, 0},   // Error
-        {curious, 128, 64, 0}, // Curious
-        {love, 128, 64, 0},    // Love
-        {sad, 128, 64, 0},     // Sad
-        {dizzy, 128, 64, 0},   // Dizzy
-        {nullptr, 0, 0, 0},    // Weather，由 WeatherView 绘制
-        {nullptr, 0, 0, 0},    // Clock，由 ClockView 绘制
-        {logo, 128, 22, 21},   // Logo
-    };
-
-    constexpr uint8_t kEmojiCount = sizeof(kEmojiBitmaps) / sizeof(kEmojiBitmaps[0]);
-    static_assert(kEmojiCount == static_cast<uint8_t>(EmojiId::Logo) + 1, "位图表必须覆盖全部 EmojiId");
-
-    // 两次重绘的最小间隔；页面内容不会逐帧变化，没必要每个主循环都刷屏
-    constexpr unsigned long kRefreshMs = 100;
+    // Logo 是 128×22 的位图，需要垂直居中
+    constexpr uint8_t kLogoY = 21;
 
 } // namespace
 
 ExpressionRenderer::ExpressionRenderer(IDisplay &display, const WeatherView &weatherView, const ClockView &clockView)
-    : _display(display), _weatherView(weatherView), _clockView(clockView), _current(EmojiId::Happy),
-      _prev(EmojiId::Happy), _lastRenderMs(0)
+    : _display(display), _weatherView(weatherView), _clockView(clockView), _current(EmojiId::Happy), _lastFrameMs(0)
 {
 }
 
 void ExpressionRenderer::Begin()
 {
     _display.Clear();
-    _prev         = _current;
-    _lastRenderMs = millis();
+    _face.Begin(millis());
+    _face.SetExpression(_current);
+    _lastFrameMs = millis() - kFrameMs;
+}
+
+void ExpressionRenderer::SetEmoji(EmojiId id)
+{
+    if (id == _current)
+        return;
+
+    _current = id;
+    if (FaceAnimator::IsFacePage(id))
+        _face.SetExpression(id);
 }
 
 void ExpressionRenderer::drawBitmapPage(const uint8_t *data, uint8_t width, uint8_t height, uint8_t y) const
 {
     _display.FirstPage();
-    do
-    {
-        _display.DrawXBMP(0, y, width, height, data);
-    } while (_display.NextPage());
+    _display.SetDrawColor(1);
+    _display.DrawXBMP(0, y, width, height, data);
+    _display.NextPage();
 }
 
-void ExpressionRenderer::Render(const WeatherData &weather, const TimeService &timeService, bool wifiConnected)
+void ExpressionRenderer::renderFace()
 {
+    _display.ClearBuffer();
+    _painter.Paint(_display, _face.State());
+    _display.SendBuffer();
+}
+
+void ExpressionRenderer::Render(const WeatherData &weather, const TimeService &timeService, bool wifiConnected,
+                                const FaceInputs &inputs)
+{
+    // 输入每帧都更新，即使这一帧因为节流不绘制
+    _face.SetInputs(inputs);
+
     const unsigned long now = millis();
-    if (_current == _prev && now - _lastRenderMs < kRefreshMs)
+    if (now - _lastFrameMs < kFrameMs)
         return;
-    _lastRenderMs = now;
+    _lastFrameMs = now;
 
-    // 原实现只在表情切换时清屏，其余时候直接重绘覆盖
-    if (_current != _prev)
-    {
-        _display.Clear();
-        _prev = _current;
-    }
-
-    const uint8_t index = static_cast<uint8_t>(_current);
     switch (_current)
     {
     case EmojiId::Weather:
         _weatherView.Render(_display, weather, wifiConnected);
-        break;
+        return;
     case EmojiId::Clock:
         _clockView.Render(_display, timeService, wifiConnected);
-        break;
-    default: {
-        const EmojiBitmap &bitmap = kEmojiBitmaps[index];
-        if (bitmap.data != nullptr)
-        {
-            drawBitmapPage(bitmap.data, bitmap.width, bitmap.height, bitmap.y);
-        }
+        return;
+    case EmojiId::Logo:
+        drawBitmapPage(logo, 128, 22, kLogoY);
+        return;
+    default:
         break;
     }
-    }
+
+    _face.Update(now);
+    renderFace();
 }

@@ -289,5 +289,17 @@ void loop()
     {
         weatherService.Update(WiFi.status() == WL_CONNECTED);
     }
-    renderer.Render(weatherService.Data(), timeService, WiFi.status() == WL_CONNECTED);
+
+    // 表情动画的输入：PAD 情感连续调制，扬声器音符驱动嘴型，
+    // 刚交互过的 1.5s 内看向用户并放大瞳孔。
+    const PADState &pad = emotionEngine.GetState();
+    const unsigned long nowMs = millis();
+    FaceInputs faceInputs;
+    faceInputs.pleasure    = pad.pleasure;
+    faceInputs.arousal     = pad.arousal;
+    faceInputs.dominance   = pad.dominance;
+    faceInputs.noteHz      = speaker.CurrentNoteFreq();
+    faceInputs.interacting = runtime.lastInteractMs != 0 && nowMs - runtime.lastInteractMs < 1500;
+
+    renderer.Render(weatherService.Data(), timeService, WiFi.status() == WL_CONNECTED, faceInputs);
 }

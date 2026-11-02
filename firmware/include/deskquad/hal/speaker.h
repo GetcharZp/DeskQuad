@@ -91,6 +91,11 @@ public:
     // 是否正在播放
     bool isPlaying() const { return _isPlaying; }
 
+    // CurrentNoteFreq 返回当前音符频率，静音或休止符返回 0
+    //
+    // 表情渲染用它驱动嘴型开合：音高越高，嘴动得越快。
+    uint16_t CurrentNoteFreq() const;
+
     // 设置静音
     void setMute(bool mute)
     {

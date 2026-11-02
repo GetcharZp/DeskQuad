@@ -126,6 +126,13 @@ void Speaker::stop()
     _noteIndex    = 0;
 }
 
+uint16_t Speaker::CurrentNoteFreq() const
+{
+    if (!_isPlaying || _currentNotes == nullptr || _noteIndex >= _noteCount)
+        return 0;
+    return _currentNotes[_noteIndex].freq;
+}
+
 // 主循环 (非阻塞播放更新)
 void Speaker::loop()
 {
