@@ -17,5 +17,5 @@ extern const uint8_t wifi[] PROGMEM;
 extern const uint8_t clockIcon[] PROGMEM;
 extern const uint8_t ipIcon[] PROGMEM;
 
-// 128x22 开机 Logo
+// 128x64 开机 Logo
 extern const uint8_t logo[] PROGMEM;

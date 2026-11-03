@@ -9,8 +9,8 @@ namespace
     // 因此即使静止画面也按这个节拍调用也不会产生额外 I2C 流量。
     constexpr unsigned long kFrameMs = 33;
 
-    // Logo 是 128×22 的位图，需要垂直居中
-    constexpr uint8_t kLogoY = 21;
+    // Logo 是 128×64 的全屏位图
+    constexpr uint8_t kLogoY = 0;
 
 } // namespace
 
@@ -72,7 +72,7 @@ void ExpressionRenderer::Render(const WeatherData &weather, const TimeService &t
         _clockView.Render(_display, timeService, wifiConnected);
         return;
     case EmojiId::Logo:
-        drawBitmapPage(logo, 128, 22, kLogoY);
+        drawBitmapPage(logo, 128, 64, kLogoY);
         return;
     default:
         break;

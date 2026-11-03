@@ -142,12 +142,11 @@ void setup()
 
     display.Begin();
     display.SetRotation(U8G2_R2);
-    // 开机 Logo
+    // 开机 Logo（128×64 全屏位图）
     display.FirstPage();
     do
     {
-        display.SetFont(u8g2_font_ncenB14_tr);
-        display.DrawXBMP(0, (64 / 2 - 22 / 2), 128, 22, logo);
+        display.DrawXBMP(0, 0, 128, 64, logo);
     } while (display.NextPage());
 
     buttons.Begin();
