@@ -39,6 +39,7 @@ void AgentService::Begin(DeepSeekAgent &agent, MultimodalFusion &fusion, Emotion
     _state        = AGENT_IDLE;
     _resultStatus = "idle";
     _pendingInput = false;
+    _pendingVoice = false;
     _cooldownMs   = 0;
     _requestSeq   = 0;
     unlock();
@@ -57,7 +58,7 @@ void AgentService::unlock()
 }
 
 // 只入队，真正的上下文构建与网络请求都在 Pump 里完成
-String AgentService::Submit(const String &text, bool contextReady)
+String AgentService::Submit(const String &text, bool contextReady, bool voice)
 {
     if (text.length() == 0 || _agent == nullptr || !_agent->isConfigured())
         return String();
@@ -77,6 +78,7 @@ String AgentService::Submit(const String &text, bool contextReady)
 
     _pendingText         = text;
     _pendingContextReady = contextReady;
+    _pendingVoice        = voice;
     _pendingRequestId    = String(kRequestIdPrefix) + String(_requestSeq);
     _lastRequestId       = _pendingRequestId;
     _lastReply           = "";
@@ -96,6 +98,7 @@ void AgentService::Pump()
 
     String text;
     bool contextReady;
+    bool voice;
     lock();
     if (!_pendingInput || _state != AGENT_IDLE)
     {
@@ -106,6 +109,7 @@ void AgentService::Pump()
     _pendingInput          = false;
     text                   = _pendingText;
     contextReady           = _pendingContextReady;
+    voice                  = _pendingVoice;
     _resultStatus          = "processing";
     const String requestId = _pendingRequestId;
     unlock();
@@ -116,6 +120,10 @@ void AgentService::Pump()
     {
         context          = _fusion->getLastContext();
         context.userText = text;
+    }
+    else if (voice)
+    {
+        context = _fusion->processVoiceText(text);
     }
     else
     {
@@ -183,6 +191,11 @@ void AgentService::ClearHistory()
     // 没有请求在跑时直接清；否则留给 Pump 在请求结束后清
     if (!busy && _agent != nullptr)
         _agent->clearHistory();
+}
+
+bool AgentService::IsReady() const
+{
+    return _agent != nullptr && _agent->isConfigured();
 }
 
 AgentSnapshot AgentService::Snapshot()

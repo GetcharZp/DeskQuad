@@ -28,11 +28,11 @@
 #include <deskquad/hal/time_service.h>
 #include <deskquad/motion/motion_director.h>
 #include <deskquad/perception/gesture_recognizer.h>
-#include <deskquad/perception/hlkv20.h>
 #include <deskquad/perception/ov2640.h>
 #include <deskquad/render/expression_renderer.h>
 #include <deskquad/render/image_data.h>
 #include <deskquad/render/views.h>
+#include <deskquad/voice/voice_service.h>
 #include <deskquad/web/web_router.h>
 
 namespace
@@ -60,7 +60,7 @@ ServoBus servoBus;
 U8g2Display display;
 Camera cameraModule;
 Speaker speaker;
-HLKV20 voiceModule;
+VoiceService voiceService;
 
 // 显示与时间
 WeatherView weatherView;
@@ -85,10 +85,10 @@ RuntimeState runtime;
 
 AppContext appContext{
     gConfig,       settingsStore, motionDirector,    renderer,    speaker,      batteryMonitor, agentService, aiAgent,
-    emotionEngine, fusion,        gestureRecognizer, voiceModule, cameraModule, weatherService, runtime,
+    emotionEngine, fusion,        gestureRecognizer, voiceService, cameraModule, weatherService, runtime,
 };
 
-// 串口、语音、手势三条输入通道的处理逻辑
+// 串口、手势两条本地输入通道的处理逻辑
 InteractionController interaction(appContext);
 
 void loadWeatherConfig()
@@ -161,11 +161,6 @@ void setup()
     speaker.begin();
     speaker.play(MELODY_STARTUP);
 
-    // 初始化语音识别模块 (HLK-V20, UART1)
-    // TX → GPIO18，RX 仅在配置时使用
-    voiceModule.Begin(deskquad::kVoiceRxPin, gConfig.voiceBaud);
-    Serial.println("[sys] voice: module ready");
-
     // 初始化摄像头模块 (OV2640 + 灰度捕获)
     // 用于 GestureRecognizer 手势识别；挥手依赖时序，间隔不能太长
     if (cameraModule.Begin())
@@ -208,6 +203,17 @@ void setup()
     // 关联各子系统；不接线时 AgentService 会静默丢弃所有 AI 请求
     agentService.Begin(aiAgent, fusion, emotionEngine, motionDirector, speaker, renderer);
 
+    // 豆包 API Key 由网页写入 NVS，缺省时语音任务仍启动，等用户补填后再用
+    deskquad::VoiceSettings voiceSettings;
+    if (settingsStore.LoadVoice(voiceSettings))
+    {
+        voiceService.SetApiKey(voiceSettings.apiKey.c_str());
+        Serial.println("[sys] voice: api key loaded from NVS");
+    }
+
+    // 语音链路依赖 WiFi STA 和 PSRAM；任务启动后先空闲等待唤醒
+    voiceService.Begin(agentService, runtime, speaker);
+
     // 设置WiFi为热点模式
     WiFi.softAP(gConfig.apSsid, gConfig.apPassword);
     Serial.println("[sys] 热点已启动");
@@ -239,7 +245,6 @@ void loop()
 {
     //---------------输入通道轮询--------------------------
     interaction.PollSerial();
-    interaction.PollVoice();
     interaction.PollGesture();
 
     //---------------情感状态衰减 (每 1s) -----------------------
@@ -256,11 +261,22 @@ void loop()
 
     // 采样与按键都是非阻塞的
     batteryMonitor.Update();
-    if (buttons.ConsumeFirst())
-        motionDirector.RequestPose(ActionId::Front);
-    if (buttons.ConsumeSecond())
-        motionDirector.RequestPose(ActionId::Back);
-    if (runtime.freeMode && millis() - gLastFreePoseMs >= kFreeModeIntervalMs)
+    const bool firstButton  = buttons.ConsumeFirst();
+    const bool secondButton = buttons.ConsumeSecond();
+    if (voiceService.IsBusy())
+    {
+        // 语音进行中，按键用于打断，不再触发姿态
+        if (firstButton || secondButton)
+            voiceService.Interrupt();
+    }
+    else
+    {
+        if (firstButton)
+            motionDirector.RequestPose(ActionId::Front);
+        if (secondButton)
+            motionDirector.RequestPose(ActionId::Back);
+    }
+    if (runtime.freeMode && !voiceService.IsBusy() && millis() - gLastFreePoseMs >= kFreeModeIntervalMs)
     {
         gLastFreePoseMs = millis();
         motionDirector.RequestPose(static_cast<ActionId>(random(kPoseFirst, kPoseLast + 1)));
@@ -297,7 +313,7 @@ void loop()
     faceInputs.pleasure    = pad.pleasure;
     faceInputs.arousal     = pad.arousal;
     faceInputs.dominance   = pad.dominance;
-    faceInputs.noteHz      = speaker.CurrentNoteFreq();
+    faceInputs.noteHz      = voiceService.IsSpeaking() ? voiceService.LevelHz() : speaker.CurrentNoteFreq();
     faceInputs.interacting = runtime.lastInteractMs != 0 && nowMs - runtime.lastInteractMs < 1500;
 
     renderer.Render(weatherService.Data(), timeService, WiFi.status() == WL_CONNECTED, faceInputs);

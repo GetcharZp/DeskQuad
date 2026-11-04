@@ -37,10 +37,10 @@ pio run -e esp32-s3 -t upload     # 上传固件
 `uploadfs` 会检查 `web/dist` 是否落后于前端源码，过期时自动执行 `npm run build`。
 设置 `DESKQUAD_SKIP_WEB_BUILD=1` 可跳过自动构建。
 
-WiFi、天气与 AI 凭据保存在 NVS，`uploadfs` 只重写文件系统，不会清空配置；
+WiFi、天气、AI 与豆包语音凭据保存在 NVS，`uploadfs` 只重写文件系统，不会清空配置；
 只有 `pio run -t erase` 擦除整片 Flash 时才会丢失。
 
 ## 访问
 
 设备启动后开启热点 `DeskQuad`，密码 `deskquad1234`，浏览器打开 <http://192.168.4.1>
-即可进入控制台，完成 WiFi、天气与 AI 设置。
+即可进入控制台，完成 WiFi、天气、AI 与语音设置。

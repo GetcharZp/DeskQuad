@@ -5,6 +5,7 @@ import ControlView from '@/views/control/ControlView.vue';
 import NotFoundView from '@/views/misc/NotFoundView.vue';
 import AiSettingsView from '@/views/settings/AiSettingsView.vue';
 import SettingsLayout from '@/views/settings/SettingsLayout.vue';
+import VoiceSettingsView from '@/views/settings/VoiceSettingsView.vue';
 import WeatherSettingsView from '@/views/settings/WeatherSettingsView.vue';
 import WifiSettingsView from '@/views/settings/WifiSettingsView.vue';
 
@@ -20,6 +21,7 @@ const routes = [
       { path: 'wifi', component: WifiSettingsView, meta: { title: 'WiFi 设置' } },
       { path: 'weather', component: WeatherSettingsView, meta: { title: '天气设置' } },
       { path: 'ai', component: AiSettingsView, meta: { title: 'AI 设置' } },
+      { path: 'voice', component: VoiceSettingsView, meta: { title: '语音设置' } },
     ],
   },
   { path: '/ai-config', redirect: '/settings/ai' },

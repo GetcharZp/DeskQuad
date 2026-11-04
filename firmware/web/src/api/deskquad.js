@@ -81,3 +81,16 @@ export function fetchAiConfig() {
 export function saveAiConfig(payload) {
   return request('/aiConfig', { method: 'POST', form: payload, responseType: 'json' });
 }
+
+export function fetchVoiceConfig() {
+  return request('/voiceConfig', { responseType: 'json' });
+}
+
+export function saveVoiceConfig(payload) {
+  return request('/voiceConfig', { method: 'POST', form: payload, responseType: 'json' });
+}
+
+// 握手需要建立 TLS 连接，给测试接口更长的超时
+export function testVoiceConfig(apiKey) {
+  return request('/voice/test', { method: 'POST', form: { apiKey }, responseType: 'json', timeout: 20000 });
+}

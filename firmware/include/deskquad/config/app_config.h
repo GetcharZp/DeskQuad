@@ -21,7 +21,6 @@ namespace deskquad
 
         // 可选参数
         uint16_t httpPort;       // (可选) HTTP 服务端口，默认 80
-        uint32_t voiceBaud;      // (可选) HLK-V20 波特率，默认 9600
         float adcDividerRatio;   // (可选) 电池分压比，默认 8.4
         float batteryMinVoltage; // (可选) 电量 0% 对应电压，默认 6.4
         float batteryMaxVoltage; // (可选) 电量 100% 对应电压，默认 8.4

@@ -46,11 +46,12 @@ public:
     //
     //	text: 用户输入文本
     //	contextReady: 为 true 时复用融合层已有的上下文，不再重复更新情感
+    //	voice: 为 true 时把文本标记为语音模态
     //
     // # Returns:
     //
     //	request_id；设备忙或 AI 未配置时返回空串
-    String Submit(const String &text, bool contextReady = false);
+    String Submit(const String &text, bool contextReady = false, bool voice = false);
 
     // Pump 处理待发送的请求，需在每次主循环中调用
     void Pump();
@@ -60,6 +61,9 @@ public:
 
     // Snapshot 读取当前请求状态
     AgentSnapshot Snapshot();
+
+    // IsReady 返回上游 LLM 是否已配置
+    bool IsReady() const;
 
 private:
     void dispatch(const AgentResponse &response);
@@ -85,6 +89,7 @@ private:
     String _resultStatus      = "idle"; // idle / queued / processing / completed / failed
     bool _pendingInput        = false;
     bool _pendingContextReady = false;
+    bool _pendingVoice        = false;
     bool _clearHistoryPending = false; // 请求进行中收到的清空请求，结束后再执行
     unsigned long _cooldownMs = 0;
     uint32_t _requestSeq      = 0;

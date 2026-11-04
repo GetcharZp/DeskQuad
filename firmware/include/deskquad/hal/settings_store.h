@@ -34,6 +34,12 @@ namespace deskquad
         String baseUrl; // 推理端点，空值直连 DeepSeek
     };
 
+    // VoiceSettings 是豆包实时语音相关的持久化配置
+    struct VoiceSettings
+    {
+        String apiKey; // 豆包开放平台 API Key
+    };
+
     // SettingsStore 负责读写 NVS 中的配置
     class SettingsStore
     {
@@ -62,6 +68,12 @@ namespace deskquad
 
         // SaveAi 写入大模型配置，空字段会清除对应键
         bool SaveAi(const AiSettings &value);
+
+        // LoadVoice 读取豆包语音配置，没有配置过时返回 false
+        bool LoadVoice(VoiceSettings &out);
+
+        // SaveVoice 写入豆包语音配置，空字段会清除对应键
+        bool SaveVoice(const VoiceSettings &value);
 
     private:
         Preferences _prefs;

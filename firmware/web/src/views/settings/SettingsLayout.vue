@@ -12,6 +12,9 @@
         <RouterLink to="/settings/ai" class="settings-link" exact-active-class="active">
           AI 设置
         </RouterLink>
+        <RouterLink to="/settings/voice" class="settings-link" exact-active-class="active">
+          语音设置
+        </RouterLink>
       </nav>
     </aside>
 

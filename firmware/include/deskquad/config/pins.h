@@ -28,8 +28,17 @@ namespace deskquad
     // 扬声器引脚
     inline constexpr uint8_t kSpeakerPin = 21;
 
-    // HLK-V20 语音模块 TX 接此引脚（UART1 RX）
-    inline constexpr uint8_t kVoiceRxPin = 18;
+    // I2S 麦克风 (INMP441)：SCK / WS / SD，L/R 接 GND 选择左声道
+    // 原 HLK-V20 的 GPIO18 已释放，留给麦克风数据线
+    inline constexpr uint8_t kMicI2sBclkPin = 11;
+    inline constexpr uint8_t kMicI2sWsPin   = 47;
+    inline constexpr uint8_t kMicI2sDinPin  = 18;
+
+    // I2S 功放 (MAX98357A)：BCLK / LRC / DIN，VIN 接 5V
+    // 39-41 属于 JTAG，占用后调试器不可用，USB 串口仍然可用
+    inline constexpr uint8_t kAmpI2sBclkPin = 39;
+    inline constexpr uint8_t kAmpI2sLrcPin  = 40;
+    inline constexpr uint8_t kAmpI2sDinPin  = 41;
 
     // OV2640 摄像头：SPI 数据线与 SCCB 配置线
     inline constexpr uint8_t kCameraCsPin   = 17;

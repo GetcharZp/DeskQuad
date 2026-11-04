@@ -16,9 +16,9 @@
 #include <deskquad/hal/speaker.h>
 #include <deskquad/motion/motion_director.h>
 #include <deskquad/perception/gesture_recognizer.h>
-#include <deskquad/perception/hlkv20.h>
 #include <deskquad/perception/ov2640.h>
 #include <deskquad/render/expression_renderer.h>
+#include <deskquad/voice/voice_service.h>
 
 // AppContext 是各子系统引用的集合
 struct AppContext
@@ -34,7 +34,7 @@ struct AppContext
     EmotionEngine &emotion;            // 情感状态
     MultimodalFusion &fusion;          // 多模态输入融合
     GestureRecognizer &gesture;        // 手势识别
-    HLKV20 &voice;                     // 语音识别
+    VoiceService &voice;               // 豆包语音识别与合成
     Camera &camera;                    // 摄像头
     WeatherService &weather;           // 天气
     RuntimeState &runtime;             // 交互状态

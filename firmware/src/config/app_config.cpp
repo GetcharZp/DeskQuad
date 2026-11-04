@@ -13,7 +13,6 @@ namespace deskquad
         cfg.weatherApiBase = "http://api.seniverse.com/v3/weather/daily.json?key=";
 
         cfg.httpPort          = 80;
-        cfg.voiceBaud         = 9600;
         cfg.adcDividerRatio   = 8.4f;
         cfg.batteryMinVoltage = 6.4f;
         cfg.batteryMaxVoltage = 8.4f;

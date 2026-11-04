@@ -43,6 +43,9 @@ public:
     // 语音命令输入
     MultimodalContext processVoice(int8_t voiceCmd);
 
+    // processVoiceText 把云端 ASR 的自由文本标记为语音模态
+    MultimodalContext processVoiceText(const String &text);
+
     // 手势输入
     MultimodalContext processGesture(int8_t gestureClass, float confidence);
 

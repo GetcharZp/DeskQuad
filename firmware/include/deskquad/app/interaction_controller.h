@@ -1,7 +1,7 @@
-// interaction_controller.h 集中处理串口、语音、手势三条输入通道
+// interaction_controller.h 集中处理串口与手势两条本地输入通道
 //
-// 每条通道最终都会落到运动、表情、音效或 AI 对话上。main.cpp 不再
-// 保存输入缓冲与处理逻辑，只按顺序调用 Poll*。
+// 语音输入由 VoiceService 独立任务处理，不再经过这里。每条通道最终
+// 都会落到运动、表情、音效或 AI 对话上。
 
 #pragma once
 
@@ -26,16 +26,11 @@ public:
     // PollSerial 读取并执行一行串口命令，无输入时立即返回
     void PollSerial();
 
-    // PollVoice 查询语音模块，有新命令时执行
-    void PollVoice();
-
     // PollGesture 按摄像头间隔抓帧并做手势识别
     void PollGesture();
 
 private:
-    void handleVoiceCommand(VoiceCommand cmd);
     void handleGesture(const GestureResult &result);
-    bool tryAgentForVoice(VoiceCommand cmd, const char *overrideText = nullptr);
 
     AppContext &_context;
     uint8_t _frameBuffer[deskquad::kGesturePixelCount]; // 80×60 灰度缓冲，GestureRecognizer 的输入

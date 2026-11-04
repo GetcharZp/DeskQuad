@@ -13,6 +13,7 @@ namespace
     constexpr const char *kAiKey         = "ai_key";
     constexpr const char *kAiModel       = "ai_model";
     constexpr const char *kAiBaseUrl     = "ai_base_url";
+    constexpr const char *kVoiceApiKey   = "voice_key";
 
     // SaveString 写入字符串并回读校验；空值表示清除该键
     bool SaveString(Preferences &prefs, const char *key, const String &value)
@@ -103,4 +104,21 @@ bool deskquad::SettingsStore::SaveAi(const AiSettings &value)
     ok      = SaveString(_prefs, kAiModel, value.model) && ok;
     ok      = SaveString(_prefs, kAiBaseUrl, value.baseUrl) && ok;
     return ok;
+}
+
+bool deskquad::SettingsStore::LoadVoice(VoiceSettings &out)
+{
+    if (!_ready)
+        return false;
+
+    out.apiKey = _prefs.getString(kVoiceApiKey, "");
+    return out.apiKey.length() > 0;
+}
+
+bool deskquad::SettingsStore::SaveVoice(const VoiceSettings &value)
+{
+    if (!_ready)
+        return false;
+
+    return SaveString(_prefs, kVoiceApiKey, value.apiKey);
 }

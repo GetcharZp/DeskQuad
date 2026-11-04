@@ -38,7 +38,7 @@ enum class EmojiId : uint8_t
     Logo    = 9, // 开机 Logo
 };
 
-// VoiceCommand 是 HLK-V20 输出的语音命令，编号与模块配置工具一致
+// VoiceCommand 是本地固定语音命令的编号，保留给离线快通道
 enum class VoiceCommand : uint8_t
 {
     None      = 0,  // 无新识别

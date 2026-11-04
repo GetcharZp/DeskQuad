@@ -118,6 +118,11 @@ MultimodalContext MultimodalFusion::processVoice(int8_t voiceCmd)
     return process(MOD_VOICE, _voiceCmdToText(voiceCmd), -1, voiceCmd, 1.0f);
 }
 
+MultimodalContext MultimodalFusion::processVoiceText(const String &text)
+{
+    return process(MOD_VOICE, text, -1, -1, 1.0f);
+}
+
 MultimodalContext MultimodalFusion::processGesture(int8_t gestureClass, float confidence)
 {
     return process(MOD_GESTURE, _gestureToText(gestureClass), gestureClass, -1, confidence);

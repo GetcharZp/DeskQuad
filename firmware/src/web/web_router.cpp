@@ -3,6 +3,7 @@
 #include <deskquad/web/routes_agent.h>
 #include <deskquad/web/routes_control.h>
 #include <deskquad/web/routes_network.h>
+#include <deskquad/web/routes_voice.h>
 #include <deskquad/web/routes_weather.h>
 #include <deskquad/web/static_files.h>
 
@@ -15,6 +16,7 @@ void RegisterAllRoutes(AsyncWebServer &server, AppContext &context)
     RegisterAgentRoutes(server, context);
     RegisterNetworkRoute(server, context);
     RegisterWeatherRoutes(server, context);
+    RegisterVoiceRoutes(server, context);
 
     server.begin();
 }
