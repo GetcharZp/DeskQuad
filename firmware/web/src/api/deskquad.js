@@ -16,6 +16,11 @@ export function fetchPercentage() {
   return request('/batteryPercentage');
 }
 
+// 拍照需要切换传感器格式并回传整帧 JPEG，给足超时
+export function capturePhoto() {
+  return request('/cameraCapture', { responseType: 'blob', timeout: 15000 });
+}
+
 export function fetchNetworkStatus() {
   return request('/networkStatus', { responseType: 'json' });
 }

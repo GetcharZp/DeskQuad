@@ -45,6 +45,7 @@ export async function request(path, options = {}) {
       }
       throw new RequestError(message || `HTTP ${response.status}`, response.status);
     }
+    if (responseType === 'blob') return await response.blob();
     return responseType === 'json' ? await response.json() : await response.text();
   } catch (error) {
     if (error.name === 'AbortError') {

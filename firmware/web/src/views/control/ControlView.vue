@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import CameraCard from '@/components/CameraCard.vue';
 import CommandGrid from '@/components/CommandGrid.vue';
 import DirectionPad from '@/components/DirectionPad.vue';
 import Icon from '@/components/Icon.vue';
@@ -45,7 +46,7 @@ async function run(action) {
 </script>
 
 <template>
-  <div class="control-grid">
+  <div class="control-page">
     <section class="battery-section">
       <div class="battery-row">
         <div class="battery-card">
@@ -70,38 +71,63 @@ async function run(action) {
       <p v-if="batteryError" class="battery-warning">暂时无法读取电量，正在重试。</p>
     </section>
 
-    <section class="card">
-      <h2 class="card-title">方向</h2>
-      <DirectionPad @command="run" />
-    </section>
+    <div class="control-columns">
+      <section class="card">
+        <h2 class="card-title">摄像头</h2>
+        <CameraCard />
+      </section>
 
-    <section class="card">
-      <h2 class="card-title">姿态动作</h2>
-      <CommandGrid :items="poseActions" :columns="3" @command="run" />
-    </section>
+      <section class="card">
+        <h2 class="card-title">方向</h2>
+        <DirectionPad @command="run" />
+      </section>
 
-    <section class="card">
-      <h2 class="card-title">自由模式</h2>
-      <CommandGrid :items="freeModeActions" :columns="2" @command="run" />
-    </section>
+      <section class="card">
+        <h2 class="card-title">姿态动作</h2>
+        <CommandGrid :items="poseActions" :columns="3" @command="run" />
+      </section>
 
-    <section class="card">
-      <h2 class="card-title">表情</h2>
-      <CommandGrid :items="expressionActions" :columns="4" @command="run" />
-    </section>
+      <section class="card">
+        <h2 class="card-title">自由模式</h2>
+        <CommandGrid :items="freeModeActions" :columns="2" @command="run" />
+      </section>
 
-    <section class="card wide">
-      <h2 class="card-title">时间与天气</h2>
-      <CommandGrid :items="networkActions" :columns="2" @command="run" />
-    </section>
+      <section class="card">
+        <h2 class="card-title">表情</h2>
+        <CommandGrid :items="expressionActions" :columns="4" @command="run" />
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">时间与天气</h2>
+        <CommandGrid :items="networkActions" :columns="2" @command="run" />
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.control-grid {
-  display: grid;
-  grid-template-columns: 1fr;
+.control-page {
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+}
+
+/*
+ * 卡片高度差异较大（摄像头最高、自由模式最矮），用多列瀑布流排版，
+ * 各列按内容自然堆叠，不会出现被同行卡片拉高的大片空白。
+ */
+.control-columns {
+  columns: 1;
+  column-gap: 14px;
+}
+
+.control-columns > .card {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+
+.control-columns > .card:last-child {
+  margin-bottom: 0;
 }
 
 .battery-section {
@@ -168,23 +194,14 @@ async function run(action) {
 }
 
 @media (min-width: 900px) {
-  .control-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .battery-section,
-  .wide {
-    grid-column: 1 / -1;
+  .control-columns {
+    columns: 2;
   }
 }
 
 @media (min-width: 1400px) {
-  .control-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .wide {
-    grid-column: span 2;
+  .control-columns {
+    columns: 3;
   }
 }
 </style>

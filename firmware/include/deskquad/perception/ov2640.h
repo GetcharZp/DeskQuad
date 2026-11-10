@@ -10,6 +10,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <deskquad/config/pins.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // Camera 通过 SPI 抓取 OV2640 画面
 class Camera
@@ -44,6 +46,22 @@ public:
     //	true 表示本次写入了新帧
     bool Poll(uint8_t *buffer);
 
+    // CaptureJpeg 临时切换到 JPEG 模式抓一张照片
+    //
+    // 抓拍前后会重新配置传感器，结束后恢复手势识别使用的 160×120
+    // RGB565 模式。与 Poll 共用同一把锁，调用期间其他抓帧会等待。
+    // 成功时 *buffer 指向 PSRAM 里的一帧 JPEG，调用方用 free() 释放。
+    //
+    // # Params:
+    //
+    //	buffer: 输出指针，成功时指向新分配的 JPEG 数据
+    //	length: 输出长度，单位字节
+    //
+    // # Returns:
+    //
+    //	true 表示 *buffer 与 *length 已更新
+    bool CaptureJpeg(uint8_t **buffer, size_t *length);
+
     // SetIntervalMs 设置 Poll 的抓帧间隔 (ms)
     void SetIntervalMs(uint32_t ms) { _intervalMs = ms; }
 
@@ -51,14 +69,28 @@ public:
     bool IsAvailable() const { return _available; }
 
 private:
-    // waitCaptureDone 等待传感器把一帧写进 FIFO
-    bool waitCaptureDone();
+    // captureGray 抓一帧并下采样为灰度图，调用前必须持有互斥锁
+    bool captureGray(uint8_t *buffer);
+
+    // configureSensor 按用途重配传感器：JPEG 拍照或 RGB565 手势帧
+    void configureSensor(bool jpeg);
 
     // readFrame 从 FIFO 读出整帧并下采样到灰度缓冲
     void readFrame(uint8_t *buffer);
 
+    // readBurst 从 FIFO 连续读出 length 字节的 JPEG 数据
+    void readBurst(uint8_t *buffer, size_t length);
+
+    // waitCaptureDone 等待传感器把一帧写进 FIFO
+    bool waitCaptureDone();
+
+    // lock/unlock 串行化主循环与 Web 任务对 SPI 总线的访问
+    bool lock(uint32_t timeoutMs);
+    void unlock();
+
     ArduCAM _cam{OV2640, deskquad::kCameraCsPin};
-    uint32_t _intervalMs = 200;
-    uint32_t _lastPollMs = 0;
-    bool _available      = false;
+    SemaphoreHandle_t _lock = nullptr;
+    uint32_t _intervalMs    = 200;
+    uint32_t _lastPollMs    = 0;
+    bool _available         = false;
 };

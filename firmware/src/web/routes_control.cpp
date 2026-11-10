@@ -2,6 +2,11 @@
 
 #include <Arduino.h>
 
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+
 #include <deskquad/web/response.h>
 
 namespace
@@ -95,6 +100,38 @@ void RegisterControlRoutes(AsyncWebServer &server, AppContext &context)
     server.on("/api/speakerMute", HTTP_GET, [&context](AsyncWebServerRequest *request) {
         context.speaker.setMute(!context.speaker.isMuted());
         request->send(200, "text/plain", context.speaker.isMuted() ? "1" : "0");
+    });
+
+    // 拍照：临时切到 JPEG 模式抓一帧，返回 image/jpeg
+    //
+    // 响应通过回调分块发送；shared_ptr 让 PSRAM 缓冲一直活到响应对象销毁，
+    // 不必等到 send() 返回后再手动释放。
+    server.on("/api/cameraCapture", HTTP_GET, [&context](AsyncWebServerRequest *request) {
+        if (!context.camera.IsAvailable())
+        {
+            deskquad::SendError(request, 503, "摄像头未就绪");
+            return;
+        }
+
+        uint8_t *data = nullptr;
+        size_t length = 0;
+        if (!context.camera.CaptureJpeg(&data, &length))
+        {
+            deskquad::SendError(request, 500, "拍照失败");
+            return;
+        }
+
+        std::shared_ptr<uint8_t> photo(data, [](uint8_t *buffer) { free(buffer); });
+        AsyncWebServerResponse *response =
+            request->beginResponse("image/jpeg", length, [photo, length](uint8_t *buffer, size_t maxLen, size_t index) {
+                if (index >= length)
+                    return static_cast<size_t>(0);
+                const size_t count = std::min(maxLen, length - index);
+                memcpy(buffer, photo.get() + index, count);
+                return count;
+            });
+        response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0", true);
+        request->send(response);
     });
 
     // 交互查询：读取后清空标志，页面据此做一次性提示

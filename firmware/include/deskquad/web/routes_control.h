@@ -8,5 +8,6 @@
 
 #include <deskquad/app/app_context.h>
 
-// RegisterControlRoutes 注册 /api/front、/api/happy、/api/batteryVoltage 等路由
+// RegisterControlRoutes 注册 /api/front、/api/happy、/api/batteryVoltage、
+// /api/cameraCapture 等路由
 void RegisterControlRoutes(AsyncWebServer &server, AppContext &context);
