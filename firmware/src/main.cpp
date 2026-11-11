@@ -20,7 +20,6 @@
 #include <deskquad/emotion/emotion_engine.h>
 #include <deskquad/emotion/multimodal_fusion.h>
 #include <deskquad/hal/battery.h>
-#include <deskquad/hal/buttons.h>
 #include <deskquad/hal/display.h>
 #include <deskquad/hal/servo_bus.h>
 #include <deskquad/hal/settings_store.h>
@@ -54,7 +53,6 @@ namespace
 const deskquad::Config gConfig = deskquad::DefaultConfig();
 
 // 硬件与外设
-Buttons buttons;
 BatteryMonitor batteryMonitor(gConfig);
 ServoBus servoBus;
 U8g2Display display;
@@ -149,7 +147,6 @@ void setup()
         display.DrawXBMP(0, 0, 128, 64, logo);
     } while (display.NextPage());
 
-    buttons.Begin();
     batteryMonitor.Begin();
     LittleFS.begin(true);   // 挂载失败时自动格式化
     settingsStore.Begin();  // 打开 NVS 配置存储
@@ -157,9 +154,8 @@ void setup()
     motionDirector.Begin(); // 关联情感动作的舵机写入接口
 
     //---------------初始化新模块--------------------------
-    // 初始化扬声器 (开机音效)
+    // 扬声器只复位播放状态；音频输出在 VoiceService 初始化 I2S 后注入
     speaker.begin();
-    speaker.play(MELODY_STARTUP);
 
     // 初始化摄像头模块 (OV2640 + 灰度捕获)
     // 用于 GestureRecognizer 手势识别；挥手依赖时序，间隔不能太长
@@ -212,6 +208,7 @@ void setup()
     }
 
     // 语音链路依赖 WiFi STA 和 PSRAM；任务启动后先空闲等待唤醒
+    // Begin 成功后会注入功放输出，开机音效在配网提示页期间播放
     voiceService.Begin(agentService, runtime, speaker);
 
     // 设置WiFi为热点模式
@@ -237,7 +234,15 @@ void setup()
         display.DrawStr(64, 43, "192.168.4.1");
         display.DrawStr(64, 60, "WIFI CTRL");
     } while (display.NextPage());
-    delay(kSplashMs);
+
+    // 开机音效是非阻塞的，用配网提示页的停留时间驱动 Speaker
+    speaker.play(MELODY_STARTUP);
+    const unsigned long splashStart = millis();
+    while (millis() - splashStart < kSplashMs)
+    {
+        speaker.loop();
+        delay(10);
+    }
     renderer.Begin();
 }
 
@@ -259,23 +264,8 @@ void loop()
     //---------------AI Agent 请求处理--------------------------
     agentService.Pump();
 
-    // 采样与按键都是非阻塞的
+    // 电量采样是非阻塞的
     batteryMonitor.Update();
-    const bool firstButton  = buttons.ConsumeFirst();
-    const bool secondButton = buttons.ConsumeSecond();
-    if (voiceService.IsBusy())
-    {
-        // 语音进行中，按键用于打断，不再触发姿态
-        if (firstButton || secondButton)
-            voiceService.Interrupt();
-    }
-    else
-    {
-        if (firstButton)
-            motionDirector.RequestPose(ActionId::Front);
-        if (secondButton)
-            motionDirector.RequestPose(ActionId::Back);
-    }
     if (runtime.freeMode && !voiceService.IsBusy() && millis() - gLastFreePoseMs >= kFreeModeIntervalMs)
     {
         gLastFreePoseMs = millis();

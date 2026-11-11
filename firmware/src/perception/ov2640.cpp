@@ -1,94 +1,144 @@
-// OV2640 摄像头实现
+// OV2640 DVP 摄像头实现
 #include <deskquad/perception/ov2640.h>
 
-#include <Wire.h>
-#include <deskquad/perception/gesture_recognizer.h>
 #include <esp_heap_caps.h>
 
-#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+
+#include <deskquad/perception/gesture_recognizer.h>
 
 namespace
 {
 
-    constexpr uint32_t kSpiClockHz       = 4000000;
-    constexpr uint32_t kCaptureTimeoutMs = 300;
+    // XCLK 由 LEDC 产生。OV2640 常规工作在 20MHz；如果排线较长导致
+    // 画面出现横纹，可以降到 10MHz。
+    constexpr int kXclkFrequencyHz = 20000000;
 
-    // 主循环与 Web 任务共用 SPI 总线，抓帧期间用互斥锁串行化。
-    // 一次拍照包含模式切换，等待时间留够一秒，超时就跳过本次抓帧。
-    constexpr uint32_t kLockTimeoutMs = 1000;
+    // 传感器固定输出 VGA YUV422。拍照用 frame2jpg() 软件编码，
+    // 质量参数范围是 0-100（越大越好），与传感器 JPEG 的 0-63 不同。
+    // 如果 VGA 帧缓冲分配失败，可改成 FRAMESIZE_QVGA (320×240)，
+    // 并把 kSensorWidth/Height 改成 320/240。
+    constexpr framesize_t kCameraFrameSize = FRAMESIZE_VGA;
+    constexpr uint8_t kPhotoJpegQuality     = 80;
+    constexpr size_t kMaxPhotoBytes         = 512 * 1024;
 
-    // JPEG 按块 burst 读取，避免一次 SPI 事务过长
-    constexpr size_t kSpiChunkBytes = 4096;
-
-    // 拍照输出 640×480 JPEG，正常只有几十 KB；上限用于挡住 FIFO 异常读数
-    constexpr uint8_t kPhotoJpegSize  = OV2640_640x480;
-    constexpr uint32_t kMaxPhotoBytes = 512 * 1024;
-
-    // 传感器输出尺寸。InitCAM 默认给 QVGA (320×240)，再缩到 160×120 把
-    // FIFO 传输量减半；一帧就是 160×120 个 RGB565 像素。
-    constexpr int kSensorWidth     = 160;
-    constexpr int kSensorHeight    = 120;
-    constexpr uint32_t kFrameBytes = kSensorWidth * kSensorHeight * 2;
-
-    constexpr int kRowBytes    = kSensorWidth * 2;
-    constexpr int kFrameWidth  = deskquad::kGestureFrameWidth;
-    constexpr int kFrameHeight = deskquad::kGestureFrameHeight;
-    constexpr int kStepX       = kSensorWidth / kFrameWidth;
-    constexpr int kStepY       = kSensorHeight / kFrameHeight;
+    // 手势帧是 640×480 YUV422，8×8 下采样成 80×60 灰度
+    constexpr int kSensorWidth  = 640;
+    constexpr int kSensorHeight = 480;
+    constexpr int kFrameWidth   = deskquad::kGestureFrameWidth;
+    constexpr int kFrameHeight  = deskquad::kGestureFrameHeight;
+    constexpr int kStepX        = kSensorWidth / kFrameWidth;
+    constexpr int kStepY        = kSensorHeight / kFrameHeight;
 
     static_assert(kSensorWidth % kFrameWidth == 0 && kSensorHeight % kFrameHeight == 0,
                   "灰度帧尺寸必须整除传感器输出尺寸");
 
-    // rgb565ToGray 把一个大端 RGB565 像素转成亮度
-    //
-    // 权重是 0.299/0.587/0.114 按 5/6/5 位宽放大 32 倍后的整数形式，
-    // 省去先把分量扩展到 8 位的步骤。
-    uint8_t rgb565ToGray(uint8_t high, uint8_t low)
+    // 等画面的超时：VGA 帧正常帧率下几百毫秒内到达
+    constexpr uint32_t kFirstFrameTimeoutMs = 2000;
+    constexpr uint32_t kCaptureTimeoutMs    = 300;
+    constexpr uint32_t kPhotoTimeoutMs      = 1000;
+
+    // 主循环与 Web 任务共用摄像头，拍照编码期间用互斥锁串行化
+    constexpr uint32_t kLockTimeoutMs = 3000;
+
+    // JpegBuffer 是软件 JPEG 编码的输出目标，直接落在 PSRAM，避免占用内部 RAM
+    struct JpegBuffer
     {
-        const uint16_t pixel = (static_cast<uint16_t>(high) << 8) | low;
-        const uint16_t r     = (pixel >> 11) & 0x1F;
-        const uint16_t g     = (pixel >> 5) & 0x3F;
-        const uint16_t b     = pixel & 0x1F;
-        return static_cast<uint8_t>((r * 79 + g * 76 + b * 30 + 16) >> 5);
+        uint8_t *data     = nullptr;
+        size_t capacity   = 0;
+        size_t length     = 0;
+        bool overflow     = false;
+    };
+
+    // jpegWriteCallback 按顺序把编码器输出的字节追加到 PSRAM 缓冲
+    size_t jpegWriteCallback(void *arg, size_t /*index*/, const void *data, size_t len)
+    {
+        JpegBuffer *out = static_cast<JpegBuffer *>(arg);
+        if (out == nullptr || data == nullptr)
+            return 0;
+        if (out->length + len > out->capacity)
+        {
+            out->overflow = true;
+            return 0;
+        }
+        memcpy(out->data + out->length, data, len);
+        out->length += len;
+        return len;
+    }
+
+    // makeConfig 生成固定的 esp32-camera 配置
+    camera_config_t makeConfig()
+    {
+        camera_config_t config = {};
+
+        config.pin_pwdn     = deskquad::kCameraPinPwdn;
+        config.pin_reset    = deskquad::kCameraPinReset;
+        config.pin_xclk     = deskquad::kCameraPinXclk;
+        config.pin_sccb_sda = deskquad::kCameraPinSiod;
+        config.pin_sccb_scl = deskquad::kCameraPinSioc;
+        config.pin_vsync    = deskquad::kCameraPinVsync;
+        config.pin_href     = deskquad::kCameraPinHref;
+        config.pin_pclk     = deskquad::kCameraPinPclk;
+        config.pin_d0       = deskquad::kCameraPinD0;
+        config.pin_d1       = deskquad::kCameraPinD1;
+        config.pin_d2       = deskquad::kCameraPinD2;
+        config.pin_d3       = deskquad::kCameraPinD3;
+        config.pin_d4       = deskquad::kCameraPinD4;
+        config.pin_d5       = deskquad::kCameraPinD5;
+        config.pin_d6       = deskquad::kCameraPinD6;
+        config.pin_d7       = deskquad::kCameraPinD7;
+
+        config.xclk_freq_hz   = kXclkFrequencyHz;
+        config.ledc_timer     = LEDC_TIMER_0;
+        config.ledc_channel   = LEDC_CHANNEL_0;
+        config.pixel_format   = PIXFORMAT_YUV422;
+        config.frame_size     = kCameraFrameSize;
+        config.jpeg_quality   = 12; // 仅 PIXFORMAT_JPEG 时有效，这里保持默认
+        // 双缓冲让手势帧更接近实时，也避免单缓冲时 DMA 等待
+        config.fb_count       = 2;
+        config.fb_location    = CAMERA_FB_IN_PSRAM;
+        config.grab_mode        = CAMERA_GRAB_LATEST;
+        config.sccb_i2c_port    = -1;
+        config.jpeg_buffer_size = 0;
+        return config;
     }
 
 } // namespace
 
 bool Camera::Begin()
 {
-    // 主循环和 Web 任务都会访问摄像头，先准备好互斥锁
-    _lock = xSemaphoreCreateMutex();
+    // 主循环和 Web 任务都会访问摄像头，先准备好互斥锁（只创建一次）
     if (_lock == nullptr)
     {
-        Serial.println("[warn] camera: mutex allocation failed");
-        return false;
+        _lock = xSemaphoreCreateMutex();
+        if (_lock == nullptr)
+        {
+            Serial.println("[warn] camera: mutex allocation failed");
+            return false;
+        }
     }
 
-    // ESP32-S3 的 SPI/I2C 可以路由到任意 GPIO，显式指定以避免占用舵机引脚
-    SPI.begin(deskquad::kCameraSckPin, deskquad::kCameraMisoPin, deskquad::kCameraMosiPin, -1);
-    SPI.setFrequency(kSpiClockHz);
-    Wire.begin(deskquad::kCameraSdaPin, deskquad::kCameraSclPin);
+    // 允许重复调用 Begin：上一次失败可能留下未释放的驱动状态
+    esp_camera_deinit();
 
-    // 复位 ArduCAM 的 FIFO 控制逻辑
-    _cam.write_reg(0x07, 0x80);
-    delay(10);
-    _cam.write_reg(0x07, 0x00);
-    delay(10);
-
-    // 先读传感器 ID：没接模块时就不必再跑一遍几百条寄存器配置
-    uint8_t vid = 0;
-    uint8_t pid = 0;
-    _cam.wrSensorReg8_8(0xFF, 0x01);
-    _cam.rdSensorReg8_8(OV2640_CHIPID_HIGH, &vid);
-    _cam.rdSensorReg8_8(OV2640_CHIPID_LOW, &pid);
-    if (vid != 0x26 || (pid != 0x41 && pid != 0x42))
+    camera_config_t config = makeConfig();
+    esp_err_t err          = esp_camera_init(&config);
+    if (err != ESP_OK)
     {
-        Serial.printf("[warn] camera: sensor not found (VID=0x%02X PID=0x%02X)\n", vid, pid);
+        Serial.printf("[warn] camera: init failed: %s\n", esp_err_to_name(err));
         return false;
     }
 
-    // 默认配置成手势识别用的 160×120 RGB565，FIFO 每帧正好是 kFrameBytes 字节
-    configureSensor(false);
+    // 等第一帧，确认数据线与时序正常，同时丢弃上电后的脏帧
+    camera_fb_t *frame = waitFrame(kFirstFrameTimeoutMs);
+    if (frame == nullptr)
+    {
+        Serial.println("[warn] camera: no frame after init");
+        esp_camera_deinit();
+        return false;
+    }
+    esp_camera_fb_return(frame);
 
     _available = true;
     return true;
@@ -102,6 +152,13 @@ bool Camera::Capture(uint8_t *buffer)
     if (!lock(0))
         return false;
 
+    // 等锁期间拍照失败可能把驱动标记为不可用
+    if (!_available)
+    {
+        unlock();
+        return false;
+    }
+
     const bool ok = captureGray(buffer);
     unlock();
     return ok;
@@ -114,54 +171,53 @@ bool Camera::CaptureJpeg(uint8_t **buffer, size_t *length)
     if (!lock(kLockTimeoutMs))
         return false;
 
+    if (!_available)
+    {
+        unlock();
+        return false;
+    }
+
     uint8_t *photo     = nullptr;
     size_t photoLength = 0;
     bool ok            = false;
 
-    // 切到 JPEG 输出抓一帧，结束后无论成败都恢复手势模式，
-    // 否则 Poll 会把 JPEG 字节当成 RGB565 帧处理。
-    configureSensor(true);
-    _cam.flush_fifo();
-    _cam.start_capture();
-    if (waitCaptureDone())
+    // 直接取当前 VGA YUV422 帧做软件 JPEG 编码，不做传感器格式切换。
+    camera_fb_t *frame = waitFrame(kPhotoTimeoutMs);
+    if (frame != nullptr)
     {
-        const uint32_t fifoLength = _cam.read_fifo_length();
-        if (fifoLength > 0 && fifoLength <= kMaxPhotoBytes)
+        JpegBuffer encoded;
+        encoded.data = static_cast<uint8_t *>(
+            heap_caps_malloc(kMaxPhotoBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (encoded.data != nullptr)
         {
-            photo = static_cast<uint8_t *>(heap_caps_malloc(fifoLength, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-            if (photo != nullptr)
+            encoded.capacity = kMaxPhotoBytes;
+            if (frame2jpg_cb(frame, kPhotoJpegQuality, jpegWriteCallback, &encoded) &&
+                encoded.length > 0 && !encoded.overflow)
             {
-                readBurst(photo, fifoLength);
-                // JPEG 必须以 SOI 标记开头；不对说明传感器没切到 JPEG 输出
-                if (fifoLength >= 2 && photo[0] == 0xFF && photo[1] == 0xD8)
-                {
-                    photoLength = fifoLength;
-                    ok          = true;
-                }
-                else
-                {
-                    Serial.println("[warn] camera: captured data is not JPEG");
-                }
+                photo       = encoded.data;
+                photoLength = encoded.length;
+                ok          = true;
             }
             else
             {
-                Serial.println("[warn] camera: photo buffer allocation failed");
+                Serial.println("[warn] camera: JPEG encode failed");
+                free(encoded.data);
             }
         }
         else
         {
-            Serial.printf("[warn] camera: photo FIFO length %lu\n", static_cast<unsigned long>(fifoLength));
+            Serial.println("[warn] camera: photo buffer allocation failed");
         }
+        esp_camera_fb_return(frame);
     }
-
-    configureSensor(false);
+    else
+    {
+        Serial.println("[warn] camera: photo capture timeout");
+    }
     unlock();
 
     if (!ok)
-    {
-        free(photo);
         return false;
-    }
 
     *buffer = photo;
     *length = photoLength;
@@ -184,32 +240,71 @@ bool Camera::Poll(uint8_t *buffer)
 
 bool Camera::captureGray(uint8_t *buffer)
 {
-    _cam.flush_fifo();
-    _cam.start_capture();
-    if (!waitCaptureDone())
+    camera_fb_t *frame = waitFrame(kCaptureTimeoutMs);
+    if (frame == nullptr)
         return false;
 
-    const uint32_t length = _cam.read_fifo_length();
-    if (length != kFrameBytes)
+    const bool ok = readFrame(frame, buffer);
+    esp_camera_fb_return(frame);
+    return ok;
+}
+
+bool Camera::readFrame(const camera_fb_t *frame, uint8_t *buffer)
+{
+    if (frame == nullptr || frame->buf == nullptr || buffer == nullptr)
+        return false;
+
+    if (frame->width != static_cast<size_t>(kSensorWidth) ||
+        frame->height != static_cast<size_t>(kSensorHeight))
     {
-        Serial.printf("[warn] camera: FIFO length %lu, expected %lu\n", static_cast<unsigned long>(length),
-                      static_cast<unsigned long>(kFrameBytes));
+        Serial.printf("[warn] camera: frame size %ux%u, expected %dx%d\n", static_cast<unsigned>(frame->width),
+                      static_cast<unsigned>(frame->height), kSensorWidth, kSensorHeight);
         return false;
     }
 
-    readFrame(buffer);
+    // YUV422 每个像素占 2 字节，亮度 Y 在像素对的第一个字节；
+    // GRAYSCALE 则每个像素 1 字节，直接使用。
+    int bytesPerPixel = 0;
+    if (frame->format == PIXFORMAT_YUV422)
+        bytesPerPixel = 2;
+    else if (frame->format == PIXFORMAT_GRAYSCALE)
+        bytesPerPixel = 1;
+    else
+    {
+        Serial.printf("[warn] camera: unsupported frame format %d\n", static_cast<int>(frame->format));
+        return false;
+    }
+
+    const size_t stride = static_cast<size_t>(frame->width) * bytesPerPixel;
+    if (frame->len < stride * frame->height)
+    {
+        Serial.printf("[warn] camera: short frame %u bytes\n", static_cast<unsigned>(frame->len));
+        return false;
+    }
+
+    for (int y = 0; y < kFrameHeight; ++y)
+    {
+        const uint8_t *row = frame->buf + static_cast<size_t>(y * kStepY) * stride;
+        uint8_t *dst       = buffer + y * kFrameWidth;
+        for (int x = 0; x < kFrameWidth; ++x)
+        {
+            dst[x] = row[static_cast<size_t>(x * kStepX) * bytesPerPixel];
+        }
+    }
     return true;
 }
 
-void Camera::configureSensor(bool jpeg)
+camera_fb_t *Camera::waitFrame(uint32_t timeoutMs)
 {
-    // BMP 让 InitCAM 走非 JPEG 分支：OV2640_QVGA 配置成 RGB565 输出；
-    // JPEG 则加载 JPEG 初始化表，之后再套用目标尺寸的缩放表。
-    _cam.set_format(jpeg ? JPEG : BMP);
-    _cam.InitCAM();
-    delay(100);
-    _cam.OV2640_set_JPEG_size(jpeg ? kPhotoJpegSize : OV2640_160x120);
-    delay(50);
+    const uint32_t start = millis();
+    // esp_camera_fb_get 在没有帧时会永久阻塞，先确认队列里有帧再取
+    while (!esp_camera_available_frames())
+    {
+        if (millis() - start > timeoutMs)
+            return nullptr;
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    return esp_camera_fb_get();
 }
 
 bool Camera::lock(uint32_t timeoutMs)
@@ -221,58 +316,4 @@ void Camera::unlock()
 {
     if (_lock != nullptr)
         xSemaphoreGive(_lock);
-}
-
-bool Camera::waitCaptureDone()
-{
-    const uint32_t start = millis();
-    while (!_cam.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK))
-    {
-        if (millis() - start > kCaptureTimeoutMs)
-        {
-            Serial.println("[warn] camera: capture timeout");
-            return false;
-        }
-        delay(1);
-    }
-    return true;
-}
-
-void Camera::readBurst(uint8_t *buffer, size_t length)
-{
-    _cam.CS_LOW();
-    _cam.set_fifo_burst();
-
-    for (size_t offset = 0; offset < length; offset += kSpiChunkBytes)
-    {
-        const size_t chunk = std::min(kSpiChunkBytes, length - offset);
-        SPI.transferBytes(nullptr, buffer + offset, chunk);
-    }
-
-    _cam.CS_HIGH();
-}
-
-void Camera::readFrame(uint8_t *buffer)
-{
-    uint8_t row[kRowBytes];
-
-    // 整帧走一次 burst 读，比逐字节 read_fifo 少几万次 SPI 事务
-    _cam.CS_LOW();
-    _cam.set_fifo_burst();
-
-    for (int y = 0; y < kSensorHeight; ++y)
-    {
-        SPI.transferBytes(nullptr, row, sizeof(row));
-        if (y % kStepY != 0)
-            continue;
-
-        uint8_t *dst = buffer + (y / kStepY) * kFrameWidth;
-        for (int x = 0; x < kFrameWidth; ++x)
-        {
-            const uint8_t *px = row + x * kStepX * 2;
-            dst[x]            = rgb565ToGray(px[0], px[1]);
-        }
-    }
-
-    _cam.CS_HIGH();
 }

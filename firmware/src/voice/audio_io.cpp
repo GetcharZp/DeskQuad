@@ -149,3 +149,22 @@ void AudioIo::ClearSpeaker()
     if (_ready)
         i2s_zero_dma_buffer(kAmpPort);
 }
+
+size_t AudioIo::WriteTone(const int16_t *samples, size_t count)
+{
+    if (!_ready || _ttsActive || samples == nullptr || count == 0)
+        return 0;
+
+    // ticks_to_wait = 0：非阻塞。DMA 满时直接丢弃这一块，提示音不需要精确补帧。
+    size_t written = 0;
+    if (i2s_write(kAmpPort, samples, count * sizeof(int16_t), &written, 0) != ESP_OK)
+        return 0;
+    return written / sizeof(int16_t);
+}
+
+void AudioIo::ClearTone()
+{
+    // TTS 正在播放时不能清 DMA，否则会截断语音
+    if (_ready && !_ttsActive)
+        ClearSpeaker();
+}

@@ -1,23 +1,24 @@
-// ov2640.h 摄像头采集 (ArduCAM Mini 2MP Plus + OV2640)
+// ov2640.h 摄像头采集 (DVP OV2640 + esp32-camera)
 //
-// 传感器固定输出 160×120 RGB565 原始帧，抓帧后直接 2×2 下采样成 80×60
-// 灰度图，作为 GestureRecognizer 的输入。这里不做 JPEG 编解码，也不
-// 保留彩图，因此初始化之后就不再切换传感器格式。
+// 传感器固定输出 VGA (640×480) 的 YUV422 数据：
+//   - 手势识别：8×8 下采样成 80×60 灰度图；
+//   - 拍照：用 frame2jpg() 软件编码成 640×480 JPEG。
+// 手势与拍照共用同一帧源，运行时不做传感器格式切换。
 
 #pragma once
 
-#include <ArduCAM.h>
 #include <Arduino.h>
-#include <SPI.h>
-#include <deskquad/config/pins.h>
+#include <esp_camera.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
-// Camera 通过 SPI 抓取 OV2640 画面
+#include <deskquad/config/pins.h>
+
+// Camera 通过 DVP 并口抓取 OV2640 画面
 class Camera
 {
 public:
-    // Begin 初始化 SPI、SCCB 与传感器
+    // Begin 初始化 DVP 并口、SCCB 与传感器
     //
     // # Returns:
     //
@@ -46,11 +47,11 @@ public:
     //	true 表示本次写入了新帧
     bool Poll(uint8_t *buffer);
 
-    // CaptureJpeg 临时切换到 JPEG 模式抓一张照片
+    // CaptureJpeg 从当前 YUV422 帧软件编码一张 JPEG
     //
-    // 抓拍前后会重新配置传感器，结束后恢复手势识别使用的 160×120
-    // RGB565 模式。与 Poll 共用同一把锁，调用期间其他抓帧会等待。
-    // 成功时 *buffer 指向 PSRAM 里的一帧 JPEG，调用方用 free() 释放。
+    // 不切换传感器格式，直接从 VGA 帧调用 frame2jpg()，因此不会影响
+    // 手势识别的背景模型和曝光。与 Poll 共用同一把锁，编码期间其他
+    // 抓帧会等待。成功时 *buffer 指向新分配的 JPEG，调用方用 free() 释放。
     //
     // # Params:
     //
@@ -72,23 +73,16 @@ private:
     // captureGray 抓一帧并下采样为灰度图，调用前必须持有互斥锁
     bool captureGray(uint8_t *buffer);
 
-    // configureSensor 按用途重配传感器：JPEG 拍照或 RGB565 手势帧
-    void configureSensor(bool jpeg);
+    // readFrame 从 YUV422/GRAYSCALE 帧中提取亮度并下采样
+    bool readFrame(const camera_fb_t *frame, uint8_t *buffer);
 
-    // readFrame 从 FIFO 读出整帧并下采样到灰度缓冲
-    void readFrame(uint8_t *buffer);
+    // waitFrame 等待驱动队列里出现一帧，超时返回 nullptr
+    camera_fb_t *waitFrame(uint32_t timeoutMs);
 
-    // readBurst 从 FIFO 连续读出 length 字节的 JPEG 数据
-    void readBurst(uint8_t *buffer, size_t length);
-
-    // waitCaptureDone 等待传感器把一帧写进 FIFO
-    bool waitCaptureDone();
-
-    // lock/unlock 串行化主循环与 Web 任务对 SPI 总线的访问
+    // lock/unlock 串行化主循环与 Web 任务对摄像头的访问
     bool lock(uint32_t timeoutMs);
     void unlock();
 
-    ArduCAM _cam{OV2640, deskquad::kCameraCsPin};
     SemaphoreHandle_t _lock = nullptr;
     uint32_t _intervalMs    = 200;
     uint32_t _lastPollMs    = 0;

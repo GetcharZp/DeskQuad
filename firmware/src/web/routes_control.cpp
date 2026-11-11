@@ -102,6 +102,12 @@ void RegisterControlRoutes(AsyncWebServer &server, AppContext &context)
         request->send(200, "text/plain", context.speaker.isMuted() ? "1" : "0");
     });
 
+    // 语音打断：空闲时调用会打开一次连续对话窗口
+    server.on("/api/voiceInterrupt", HTTP_GET, [&context](AsyncWebServerRequest *request) {
+        context.voice.Interrupt();
+        deskquad::SendOk(request);
+    });
+
     // 拍照：临时切到 JPEG 模式抓一帧，返回 image/jpeg
     //
     // 响应通过回调分块发送；shared_ptr 让 PSRAM 缓冲一直活到响应对象销毁，

@@ -101,7 +101,11 @@ void VoiceService::Begin(AgentService &agent, RuntimeState &runtime, Speaker &sp
     if (!_hasKey)
         Serial.println("[warn] voice: api key missing, configure it in the web console");
 
-    if (!_audio.Begin() || !_ring.Begin(kRingSamples) || !_ws.Begin())
+    // 功放同时输出旋律提示音；音频就绪后把输出注入 Speaker
+    if (_audio.Begin() && _speaker != nullptr)
+        _speaker->SetToneSink(&_audio);
+
+    if (!_audio.IsReady() || !_ring.Begin(kRingSamples) || !_ws.Begin())
     {
         _state = State::Error;
         Serial.println("[warn] voice: audio/psram init failed, voice disabled");
@@ -649,7 +653,10 @@ void VoiceService::RunVoice()
         _state    = State::Speaking;
         _speaking = true;
         _cancel   = false;
+        // 播放期间独占功放，Speaker 的旋律提示音自动让路
+        _audio.SetTtsActive(true);
         const bool spoken = _tts.Speak(apiKey, reply.c_str(), _audio, _cancel, _level);
+        _audio.SetTtsActive(false);
         _speaking         = false;
         unlockWs();
         _muteUntil = millis() + 400;
