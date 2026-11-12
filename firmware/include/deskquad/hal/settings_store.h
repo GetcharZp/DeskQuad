@@ -2,6 +2,9 @@
 //
 // 使用 Preferences(NVS) 而不是 LittleFS：uploadfs 会重写整个文件系统分区，
 // 存在 LittleFS 里的配置会被清掉；NVS 分区与文件系统分离，刷新固件不受影响。
+//
+// 配置写在独立分区 nvs_cfg（见 partitions.csv），不与 WiFi/PHY 使用的默认
+// nvs 分区共享：默认分区写满或损坏时 Arduino 核会整片擦除它，独立分区不受影响。
 // 布局不对外暴露，读写都通过 SettingsStore。
 
 #pragma once

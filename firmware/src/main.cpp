@@ -133,9 +133,10 @@ void setup()
     // 串口命令按行读取，限制等待时间，避免半行输入阻塞主循环
     Serial.setTimeout(50);
 
-    // WiFi 驱动默认会把凭据和射频校准数据写进 NVS。NVS 分区只有 20KB，写满后
-    // Arduino 核会擦除整个 NVS 分区，WiFi/天气/AI 配置会一起丢失。
-    // 配置由 SettingsStore 自己保存，这里关掉驱动侧持久化，避免与它争抢 NVS。
+    // WiFi 驱动默认会把凭据和射频校准数据写进默认 nvs 分区。该分区只有 20KB，
+    // 写满后 Arduino 核会在启动时整片擦除它。用户配置已经放到独立的 nvs_cfg
+    // 分区（见 partitions.csv / SettingsStore），这里再关掉驱动侧持久化，
+    // 减少默认分区的擦写，避免它反复写满后拖慢启动。
     WiFi.persistent(false);
 
     display.Begin();

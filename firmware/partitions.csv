@@ -1,0 +1,19 @@
+# DeskQuad 16MB 分区表（ESP32-S3-N16R8）
+#
+# 与 Arduino 自带的 default_16MB.csv 的区别：
+#   * 新增 nvs_cfg（data/nvs），用户配置只写这里，与默认 nvs 隔离；
+#   * app1 末尾让出 64KB 给 nvs_cfg，其余分区偏移与 default_16MB.csv 完全一致，
+#     因此升级时只需重新烧录固件，文件系统（spiffs）不用重刷。
+#
+# 默认 nvs 会被 WiFi 驱动和 PHY 射频校准数据反复写入，写满或损坏时
+# Arduino 核会在下次启动时把整个 nvs 分区擦除；用户配置放在独立的
+# nvs_cfg 里就不会被殃及（见 hal/settings_store.cpp）。
+
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x640000,
+app1,     app,  ota_1,   0x650000, 0x630000,
+nvs_cfg,  data, nvs,     0xc80000, 0x10000,
+spiffs,   data, spiffs,  0xc90000, 0x360000,
+coredump, data, coredump,0xff0000, 0x10000,

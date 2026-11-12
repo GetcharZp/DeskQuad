@@ -37,8 +37,7 @@ pio run -e esp32-s3 -t upload     # 上传固件
 `uploadfs` 会检查 `web/dist` 是否落后于前端源码，过期时自动执行 `npm run build`。
 设置 `DESKQUAD_SKIP_WEB_BUILD=1` 可跳过自动构建。
 
-WiFi、天气、AI 与豆包语音凭据保存在 NVS，`uploadfs` 只重写文件系统，不会清空配置；
-只有 `pio run -t erase` 擦除整片 Flash 时才会丢失。
+WiFi、天气、AI 与豆包语音凭据保存在独立 NVS 分区 `nvs_cfg`（见 `partitions.csv`），只有 `pio run -t erase` 擦除整片 Flash 时才会丢失。
 
 ## 访问
 
