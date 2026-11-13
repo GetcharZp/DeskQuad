@@ -450,6 +450,7 @@ namespace deskquad::voice
         }
 
         const uint32_t deadline = millis() + kTtsTimeoutMs;
+        size_t totalSamples     = 0; // 已写入功放的样本数，用来判断 TTS 是否真的下了音频
         while (!expired(deadline))
         {
             if (cancel)
@@ -464,25 +465,36 @@ namespace deskquad::voice
             if (length == 0)
                 continue;
             if (length < 0)
+            {
+                _ws.Close();
                 return false;
+            }
 
             ParsedMessage msg;
             if (!ParseMessage(_ws.Data(), static_cast<size_t>(length), msg))
+            {
+                _ws.Close();
                 return false;
+            }
 
             if (msg.type == kErrorServer)
             {
                 Serial.printf("[warn] voice: tts error event=%d len=%u\n", msg.event,
                               static_cast<unsigned>(msg.payloadLen));
+                _ws.Close();
                 return false;
             }
             if (msg.type == kFullServer && (msg.event == 51 || msg.event == 153))
+            {
+                _ws.Close();
                 return false;
+            }
             if (msg.type == kFullServer && msg.event == 152)
             {
                 sendEvent(2, nullptr, "{}", true);
                 _ws.Close();
                 level = 0;
+                Serial.printf("[voice] tts: done, %u samples written\n", static_cast<unsigned>(totalSamples));
                 return true;
             }
             if (msg.type != kAudioServer || msg.event != 352 || msg.payloadLen < 2)
@@ -513,6 +525,7 @@ namespace deskquad::voice
                 const size_t count = std::min<size_t>(320, samples - offset);
                 if (!audio.WritePcm(pcm + offset, count))
                     return false;
+                totalSamples += count;
             }
         }
 

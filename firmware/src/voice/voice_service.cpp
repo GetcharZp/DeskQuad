@@ -12,6 +12,9 @@ namespace
     constexpr size_t kMicFrame    = 320;   // 20ms
     constexpr size_t kAsrChunk    = 3200;  // 200ms
 
+    // 开机前 15s 每秒打印一次麦克风能量，用来确认 INMP441 接线和 VAD 阈值
+    constexpr uint32_t kMicProbeMs = 15000;
+
     bool expired(uint32_t deadline)
     {
         return static_cast<int32_t>(millis() - deadline) >= 0;
@@ -329,6 +332,11 @@ void VoiceService::RunMic()
         const size_t count = _audio.ReadMic(frame, kMicFrame, 50);
         if (count == 0)
         {
+            if (millis() < kMicProbeMs && millis() - _lastProbeMs >= 1000)
+            {
+                _lastProbeMs = millis();
+                Serial.println("[warn] voice: mic no data (check I2S wiring: SCK/SD/WS/L-R)");
+            }
             vTaskDelay(1);
             continue;
         }
@@ -337,6 +345,13 @@ void VoiceService::RunMic()
         for (size_t i = 0; i < count; i++)
             sum += static_cast<int32_t>(frame[i]) * static_cast<int32_t>(frame[i]);
         const uint32_t rms = static_cast<uint32_t>(sqrt(static_cast<double>(sum) / count));
+
+        if (millis() < kMicProbeMs && millis() - _lastProbeMs >= 1000)
+        {
+            _lastProbeMs = millis();
+            Serial.printf("[voice] mic rms=%u floor=%u\n", static_cast<unsigned>(rms),
+                          static_cast<unsigned>(_noiseFloor));
+        }
 
         if (_resetVad)
         {
@@ -380,6 +395,7 @@ void VoiceService::RunMic()
             {
                 if (++_speechRun >= deskquad::voice::kStartFrames)
                 {
+                    Serial.printf("[voice] speech start rms=%u\n", static_cast<unsigned>(rms));
                     _inSpeech      = true;
                     _speechStart   = true;
                     _speechStartMs = millis();
@@ -398,6 +414,7 @@ void VoiceService::RunMic()
             {
                 if (++_silenceRun >= deskquad::voice::kSilenceFrames)
                 {
+                    Serial.println("[voice] speech end");
                     _inSpeech   = false;
                     _speechEnd  = true;
                     _silenceRun = 0;
@@ -428,6 +445,17 @@ void VoiceService::RunVoice()
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
+
+        // 对话窗口到期：兜底关闭可能残留的会话（正常流程每次说完就关，
+        // TTS 失败等异常路径可能留下 TLS 连接），避免继续占用语音服务
+        if (_conversationOpen && expired(_conversationUntil) && lockWs())
+        {
+            _conversationOpen = false;
+            _ws.Close();
+            unlockWs();
+            Serial.println("[voice] conversation window expired, session closed");
+        }
+
         if (!_speechStart)
         {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -476,6 +504,7 @@ void VoiceService::RunVoice()
 
         if (!_asr.Open(apiKey))
         {
+            Serial.println("[warn] voice: asr open failed");
             unlockWs();
             _state = State::Idle;
             resetInput();
@@ -559,6 +588,7 @@ void VoiceService::RunVoice()
         const String finalText = text.length() > 0 ? text : seen;
         if (finalText.length() == 0)
         {
+            Serial.println("[warn] voice: asr returned empty text");
             _state = State::Idle;
             resetInput();
             vTaskDelay(pdMS_TO_TICKS(200));

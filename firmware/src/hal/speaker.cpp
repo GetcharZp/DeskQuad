@@ -1,20 +1,24 @@
 // speaker.cpp 旋律提示音实现
 //
-// 音符以方波合成，按 10ms 一块非阻塞写入 I2S 功放。功放同时被 TTS
-// 使用，TTS 播放期间 IsToneBusy() 为 true，提示音自动让路。
+// 音符以方波合成，按时间轴预喂（提前 60ms）写入 I2S 功放，避免主循环
+// 抖动导致 DMA 欠载断音。功放同时被 TTS 使用，TTS 播放期间
+// IsToneBusy() 为 true，提示音自动让路。
 #include <deskquad/hal/speaker.h>
 
 namespace
 {
     // 与 AudioIo 的功放配置保持一致：16kHz / 16bit / 单声道
     constexpr uint32_t kToneSampleRate = 16000;
+    constexpr uint32_t kSamplesPerMs   = kToneSampleRate / 1000; // 16
 
     // 方波幅度约为满量程的 15%，避免提示音过响
     constexpr int16_t kToneAmplitude = 5000;
 
-    // 每 10ms 喂一块，和 16kHz 采样率对应
-    constexpr size_t kFeedSamples        = 160;
-    constexpr unsigned long kFeedIntervalMs = 10;
+    // 每次 loop 最多生成 20ms，避免长时间占用主循环
+    constexpr size_t kFeedSamples = 320;
+
+    // 按时间轴多喂 60ms：OLED 软件 I2C 渲染时主循环单次可达几十毫秒
+    constexpr uint32_t kLeadSamples = 60 * kSamplesPerMs;
 
     // Guard 在函数作用域内持有 Speaker 的递归锁，析构时释放
     class Guard
@@ -137,7 +141,7 @@ void Speaker::playNotes(const Note *notes, uint16_t count)
     _noteIndex    = 0;
     _isPlaying    = true;
     _noteStartMs  = millis();
-    _lastFeedMs   = _noteStartMs;
+    _fedSamples   = 0;
     startNote(notes[0].freq);
 }
 
@@ -171,9 +175,8 @@ void Speaker::startNote(uint16_t freq)
     _phase     = 0;
     _phaseStep = freq == 0 ? 0 : static_cast<uint32_t>((static_cast<uint64_t>(freq) << 32) / kToneSampleRate);
 
-    // 丢掉上一音符还留在 DMA 里的数据，让换音立即生效
-    if (_sink != nullptr && !_sink->IsToneBusy())
-        _sink->ClearTone();
+    // 不再清空 DMA：预喂只有 30ms，换音延迟可以忽略，
+    // 而清空会丢掉已排队的音频，在换音处留下可闻的空洞。
 }
 
 // 主循环 (非阻塞播放更新)
@@ -221,28 +224,51 @@ void Speaker::loop()
     if (_sink == nullptr || _sink->IsToneBusy())
         return;
 
-    // 按固定节拍喂数据，避免主循环跑得越快写得越多
-    if (now - _lastFeedMs < kFeedIntervalMs)
-        return;
-    _lastFeedMs = now;
-    feedTone();
+    // 按时间轴提前 kLeadSamples 喂数据，主循环偶尔卡顿也不会断音
+    const uint32_t target = static_cast<uint32_t>(elapsed) * kSamplesPerMs + kLeadSamples;
+    while (_fedSamples < target)
+    {
+        uint32_t due = target - _fedSamples;
+        if (due > kFeedSamples)
+            due = kFeedSamples;
+        const size_t written = feedTone(due);
+        _fedSamples += written;
+        if (written < due)
+            break; // DMA 已满，下次 loop 继续
+    }
 }
 
-void Speaker::feedTone()
+size_t Speaker::feedTone(uint32_t count)
 {
     int16_t samples[kFeedSamples];
-    for (size_t i = 0; i < kFeedSamples; i++)
+    const uint32_t step = _phaseStep;
+    uint32_t phase      = _phase;
+
+    for (uint32_t i = 0; i < count; i++)
     {
-        if (_phaseStep == 0)
+        if (step == 0)
         {
             samples[i] = 0;
         }
         else
         {
-            _phase += _phaseStep;
+            phase += step;
             // 相位最高位决定方波高低电平
-            samples[i] = (_phase & 0x80000000u) != 0 ? kToneAmplitude : -kToneAmplitude;
+            samples[i] = (phase & 0x80000000u) != 0 ? kToneAmplitude : -kToneAmplitude;
         }
     }
-    _sink->WriteTone(samples, kFeedSamples);
+
+    const size_t written = _sink->WriteTone(samples, count);
+    if (written >= count)
+    {
+        _phase = phase;
+        return count;
+    }
+
+    // 只推进实际写入的样本，未写入的部分下次重新生成
+    uint32_t advanced = _phase;
+    for (size_t i = 0; i < written; i++)
+        advanced += step;
+    _phase = advanced;
+    return written;
 }

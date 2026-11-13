@@ -34,8 +34,9 @@ namespace deskquad::voice
     // 触发后保留的预录时长，避免切掉第一个字
     inline constexpr uint32_t kPreRollSamples = 8000; // 500ms
 
-    // 一次唤醒后的连续对话窗口
-    inline constexpr uint32_t kConversationWindowMs = 20000;
+    // 一次唤醒后的连续对话窗口；15s 内没有新对话就结束会话，
+    // 后续说话需要重新唤醒，避免长时间占用语音会话
+    inline constexpr uint32_t kConversationWindowMs = 15000;
 
     // 网络阶段超时
     inline constexpr uint32_t kAsrFinalTimeoutMs = 6000;
@@ -46,6 +47,7 @@ namespace deskquad::voice
     inline constexpr uint32_t kStartRmsFloor = 900;
     inline constexpr uint32_t kEndRmsFloor   = 500;
 
-    inline constexpr const char *kWakeWords[] = {"小智", "小志", "机器狗", "deskquad", "xiaozhi"};
+    // 唤醒词在 ASR 文本里做子串匹配，大小写不敏感
+    inline constexpr const char *kWakeWords[] = {"小呆", "呆呆", "deskquad", "xiaodai"};
 
 } // namespace deskquad::voice

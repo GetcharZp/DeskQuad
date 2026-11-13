@@ -145,4 +145,5 @@ private:
     uint16_t _silenceRun = 0;
     bool _inSpeech       = false;
     uint32_t _speechStartMs = 0;
+    uint32_t _lastProbeMs   = 0; // 麦克风能量调试日志的节流
 };

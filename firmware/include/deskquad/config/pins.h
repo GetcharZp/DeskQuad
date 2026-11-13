@@ -25,7 +25,13 @@ namespace deskquad
     inline constexpr uint8_t kOledClockPin = 5;
     inline constexpr uint8_t kOledDataPin  = 4;
 
-    // I2S 麦克风 (INMP441)：SCK / WS / SD，L/R 接 GND 选择左声道
+    // I2S 麦克风 (INMP441)：模块丝印 → I2S 信号名 → GPIO
+    //   SCK  -> BCLK  位时钟                -> GPIO11
+    //   WS   -> LRCLK 帧/声道选择时钟       -> GPIO47
+    //   SD   -> DIN   数据输出（接 MCU 输入）-> GPIO18
+    //   L/R  -> GND（选择左声道，代码只取左声道）
+    //   VDD  -> 3.3V（不要接 5V）   GND -> GND
+    // 注意 SD 是麦克风的数据输出，代码里叫 DIN 是站在 MCU 一侧的命名。
     inline constexpr uint8_t kMicI2sBclkPin = 11;
     inline constexpr uint8_t kMicI2sWsPin   = 47;
     inline constexpr uint8_t kMicI2sDinPin  = 18;

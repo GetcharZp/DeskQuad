@@ -116,8 +116,8 @@ private:
     // startNote 切换到新音符：清空功放里上一音符的尾音并复位相位
     void startNote(uint16_t freq);
 
-    // feedTone 生成一小段 PCM 并非阻塞写入功放
-    void feedTone();
+    // feedTone 生成 count 个样本并写入功放，返回实际写入数量
+    size_t feedTone(uint32_t count);
 
     ToneSink *_sink = nullptr;
     bool _mute       = false;
@@ -131,7 +131,7 @@ private:
     uint16_t _noteCount       = 0;
     uint16_t _noteIndex       = 0;
     unsigned long _noteStartMs = 0;
-    unsigned long _lastFeedMs  = 0;
+    uint32_t _fedSamples       = 0; // 已喂给功放的样本数（相对本次播放起点）
 
     // 方波相位累加器
     uint32_t _phase     = 0;

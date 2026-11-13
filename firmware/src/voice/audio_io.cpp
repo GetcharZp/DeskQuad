@@ -14,6 +14,10 @@ namespace
     constexpr int kDmaCount = 6;
     constexpr int kDmaLen   = 320; // 20ms @ 16kHz
 
+    // 功放 DMA 比麦克风更深：TTS 音频按网络节奏到达，缓冲太浅会欠载断音
+    constexpr int kAmpDmaCount = 8;
+    constexpr int kAmpDmaLen   = 512; // 32ms @ 16kHz
+
     i2s_config_t micConfig()
     {
         i2s_config_t cfg        = {};
@@ -39,8 +43,8 @@ namespace
         cfg.channel_format      = I2S_CHANNEL_FMT_ONLY_LEFT;
         cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
         cfg.intr_alloc_flags    = ESP_INTR_FLAG_LEVEL1;
-        cfg.dma_buf_count       = kDmaCount;
-        cfg.dma_buf_len         = kDmaLen;
+        cfg.dma_buf_count       = kAmpDmaCount;
+        cfg.dma_buf_len         = kAmpDmaLen;
         cfg.use_apll            = false;
         cfg.tx_desc_auto_clear  = true;
         return cfg;
@@ -155,9 +159,10 @@ size_t AudioIo::WriteTone(const int16_t *samples, size_t count)
     if (!_ready || _ttsActive || samples == nullptr || count == 0)
         return 0;
 
-    // ticks_to_wait = 0：非阻塞。DMA 满时直接丢弃这一块，提示音不需要精确补帧。
+    // 短暂阻塞而不是丢弃：DMA 满时等一个缓冲周期即可，
+    // 丢块会在提示音里留下可闻的空洞。
     size_t written = 0;
-    if (i2s_write(kAmpPort, samples, count * sizeof(int16_t), &written, 0) != ESP_OK)
+    if (i2s_write(kAmpPort, samples, count * sizeof(int16_t), &written, pdMS_TO_TICKS(20)) != ESP_OK)
         return 0;
     return written / sizeof(int16_t);
 }
