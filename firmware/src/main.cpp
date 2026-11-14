@@ -12,6 +12,7 @@
 #include <deskquad/app/agent_service.h>
 #include <deskquad/app/app_context.h>
 #include <deskquad/app/interaction_controller.h>
+#include <deskquad/app/interaction_status.h>
 #include <deskquad/app/runtime_state.h>
 #include <deskquad/app/weather_service.h>
 #include <deskquad/config/app_config.h>
@@ -42,6 +43,9 @@ namespace
     // 自由模式下两次随机动作的最小间隔
     constexpr unsigned long kFreeModeIntervalMs = 3000;
     unsigned long gLastFreePoseMs               = 0;
+
+    // SNTP 只在 WiFi 从断开变为连接时启动一次；断线重连后重新同步
+    bool gNtpStarted = false;
 
     // 自由模式随机挑选的范围：姿态 Front..RandomEmote，表情 Happy..Dizzy
     constexpr uint8_t kPoseFirst  = static_cast<uint8_t>(ActionId::Front);
@@ -124,7 +128,6 @@ void loadWiFiConfig()
     }
 
     Serial.println("WiFi connected");
-    timeService.Begin();
 }
 
 void setup()
@@ -262,9 +265,6 @@ void loop()
     //---------------情感动作更新 (非阻塞)-------------------
     motionDirector.Update();
 
-    //---------------AI Agent 请求处理--------------------------
-    agentService.Pump();
-
     // 电量采样是非阻塞的
     batteryMonitor.Update();
     if (runtime.freeMode && !voiceService.IsBusy() && millis() - gLastFreePoseMs >= kFreeModeIntervalMs)
@@ -290,13 +290,26 @@ void loop()
         speaker.play(doneMelody);
     }
 
+    // WiFi 可能在开机后才由网页配置，连接状态变化时补启 SNTP，
+    // 否则默认时间页会一直停在 SYNC。
+    const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+    if (wifiConnected && !gNtpStarted)
+    {
+        timeService.Begin();
+        gNtpStarted = true;
+    }
+    else if (!wifiConnected)
+    {
+        gNtpStarted = false;
+    }
+
     // 与原实现一致：只有停留在天气页时才发起查询
     if (renderer.Current() == EmojiId::Weather)
     {
-        weatherService.Update(WiFi.status() == WL_CONNECTED);
+        weatherService.Update(wifiConnected);
     }
 
-    // 表情动画的输入：PAD 情感连续调制，扬声器音符驱动嘴型，
+    // 表情动画的输入：PAD 情感连续调制，扬声器音符驱动眼睛弹跳，
     // 刚交互过的 1.5s 内看向用户并放大瞳孔。
     const PADState &pad = emotionEngine.GetState();
     const unsigned long nowMs = millis();
@@ -307,5 +320,24 @@ void loop()
     faceInputs.noteHz      = voiceService.IsSpeaking() ? voiceService.LevelHz() : speaker.CurrentNoteFreq();
     faceInputs.interacting = runtime.lastInteractMs != 0 && nowMs - runtime.lastInteractMs < 1500;
 
-    renderer.Render(weatherService.Data(), timeService, WiFi.status() == WL_CONNECTED, faceInputs);
+    // ASR/TTS 由语音任务直接给出；没有语音活动时再检查 AI 请求，
+    // Web/手势/串口触发的对话同样会显示“思考中”。
+    InteractionStatus interactionStatus = {};
+    interactionStatus.kind              = voiceService.Activity();
+    interactionStatus.level             = voiceService.Level();
+    if (interactionStatus.kind == InteractionKind::None &&
+        agentService.Activity() == InteractionKind::Thinking)
+        interactionStatus.kind = InteractionKind::Thinking;
+
+    renderer.Render(weatherService.Data(), timeService, wifiConnected, faceInputs, interactionStatus);
+
+    // AI 请求是阻塞的 HTTP 调用。Pump 之前先强制刷一帧，确保“思考中”胶囊
+    // 已经落在屏幕上；请求期间画面不再刷新，但提示不会丢。
+    if (agentService.Activity() == InteractionKind::Thinking)
+    {
+        if (interactionStatus.kind == InteractionKind::None)
+            interactionStatus.kind = InteractionKind::Thinking;
+        renderer.Render(weatherService.Data(), timeService, wifiConnected, faceInputs, interactionStatus, true);
+    }
+    agentService.Pump();
 }

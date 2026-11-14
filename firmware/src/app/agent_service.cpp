@@ -198,6 +198,14 @@ bool AgentService::IsReady() const
     return _agent != nullptr && _agent->isConfigured();
 }
 
+InteractionKind AgentService::Activity()
+{
+    lock();
+    const bool busy = (_state == AGENT_BUSY || _pendingInput);
+    unlock();
+    return busy ? InteractionKind::Thinking : InteractionKind::None;
+}
+
 AgentSnapshot AgentService::Snapshot()
 {
     AgentSnapshot snapshot;

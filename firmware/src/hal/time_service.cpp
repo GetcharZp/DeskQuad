@@ -1,21 +1,5 @@
 #include <deskquad/hal/time_service.h>
 
-#include <stdio.h>
-
-namespace
-{
-
-    // localTime 取当前本地时间，时区由 configTzTime 设置的 TZ 决定
-    struct tm localTime()
-    {
-        struct tm now  = {};
-        const time_t t = time(nullptr);
-        localtime_r(&t, &now);
-        return now;
-    }
-
-} // namespace
-
 TimeService::TimeService(const deskquad::Config &config) : _config(config) {}
 
 void TimeService::Begin()
@@ -24,8 +8,20 @@ void TimeService::Begin()
     configTzTime(_config.ntpTimezone, _config.ntpServer);
 }
 
-void TimeService::Format(char *out, size_t size) const
+ClockReading TimeService::Now() const
 {
-    const struct tm now = localTime();
-    snprintf(out, size, "%d:%02d", now.tm_hour, now.tm_min);
+    struct tm now  = {};
+    const time_t t = time(nullptr);
+    localtime_r(&t, &now);
+
+    ClockReading reading;
+    reading.hour    = static_cast<uint8_t>(now.tm_hour);
+    reading.minute  = static_cast<uint8_t>(now.tm_min);
+    reading.second  = static_cast<uint8_t>(now.tm_sec);
+    reading.month   = static_cast<uint8_t>(now.tm_mon + 1);
+    reading.day     = static_cast<uint8_t>(now.tm_mday);
+    reading.weekday = static_cast<uint8_t>(now.tm_wday);
+    // SNTP 同步前 time() 返回 1970 年，用年份判断是否已有可信时间
+    reading.synced = (now.tm_year + 1900) >= 2024;
+    return reading;
 }

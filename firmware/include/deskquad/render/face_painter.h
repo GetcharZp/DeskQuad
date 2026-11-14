@@ -7,7 +7,7 @@
 #include <deskquad/hal/display.h>
 #include <deskquad/render/face_model.h>
 
-// FacePainter 绘制程序化表情与特效
+// FacePainter 绘制两只程序化眼睛
 class FacePainter
 {
 public:

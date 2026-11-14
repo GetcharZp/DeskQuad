@@ -14,6 +14,7 @@
 #include <freertos/task.h>
 
 #include <deskquad/app/agent_service.h>
+#include <deskquad/app/interaction_status.h>
 #include <deskquad/app/runtime_state.h>
 #include <deskquad/hal/speaker.h>
 #include <deskquad/voice/audio_io.h>
@@ -71,6 +72,12 @@ public:
 
     // LevelHz 把当前播放/录音能量映射成表情驱动的“音高”
     uint16_t LevelHz() const;
+
+    // Level 返回最近一帧的音频能量，0..100
+    uint8_t Level() const { return _level; }
+
+    // Activity 把内部语音状态映射成屏幕状态提示
+    InteractionKind Activity() const;
 
     const char *Status() const;
 

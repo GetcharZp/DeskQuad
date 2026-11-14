@@ -51,6 +51,9 @@ public:
     virtual void SetCursor(int x, int y)                 = 0;
     virtual void Print(const char *text)                 = 0;
 
+    // StrWidth 返回当前字体下文本的像素宽度，用于居中排版
+    virtual int StrWidth(const char *text) = 0;
+
     // 位图
     virtual void DrawXBMP(int x, int y, int w, int h, const uint8_t *bitmap) = 0;
 
@@ -60,6 +63,7 @@ public:
     virtual void DrawBox(int x, int y, int w, int h)                       = 0;
     virtual void DrawRBox(int x, int y, int w, int h, int r)               = 0;
     virtual void DrawFrame(int x, int y, int w, int h)                     = 0;
+    virtual void DrawRFrame(int x, int y, int w, int h, int r)             = 0;
     virtual void DrawCircle(int x, int y, int r)                           = 0;
     virtual void DrawDisc(int x, int y, int r)                             = 0;
     virtual void DrawFilledEllipse(int x, int y, int rx, int ry)           = 0;
@@ -86,6 +90,7 @@ public:
     void DrawStr(int x, int y, const char *text) override;
     void SetCursor(int x, int y) override;
     void Print(const char *text) override;
+    int StrWidth(const char *text) override;
     void DrawXBMP(int x, int y, int w, int h, const uint8_t *bitmap) override;
 
     void DrawPixel(int x, int y) override;
@@ -93,6 +98,7 @@ public:
     void DrawBox(int x, int y, int w, int h) override;
     void DrawRBox(int x, int y, int w, int h, int r) override;
     void DrawFrame(int x, int y, int w, int h) override;
+    void DrawRFrame(int x, int y, int w, int h, int r) override;
     void DrawCircle(int x, int y, int r) override;
     void DrawDisc(int x, int y, int r) override;
     void DrawFilledEllipse(int x, int y, int rx, int ry) override;

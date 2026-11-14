@@ -4,17 +4,12 @@
 
 namespace
 {
-    constexpr int kEyeLeftX  = 42;
-    constexpr int kEyeRightX = 86;
-    constexpr int kEyeY      = 27;
-    constexpr int kMouthX    = 64;
-    constexpr int kMouthY    = 47;
-
-    // 小精灵位图，XBM 格式：每行 1 字节，bit0 是最左像素
-    const uint8_t kHeart[] PROGMEM = {0x36, 0x7F, 0x7F, 0x3E, 0x1C, 0x08};
-    const uint8_t kStar[] PROGMEM  = {0x08, 0x08, 0x3E, 0x1C, 0x36, 0x22};
-    const uint8_t kTear[] PROGMEM  = {0x04, 0x04, 0x0E, 0x0E, 0x1F, 0x0E, 0x04};
-    const uint8_t kSweat[] PROGMEM = {0x04, 0x0E, 0x1F, 0x1F, 0x0E, 0x04};
+    // 整张脸只有两只眼睛：位置、大小、倾角、眼皮、瞳孔全都参与表演，
+    // 不再画眉毛、嘴、腮红或粒子特效。
+    constexpr int kEyeLeftX  = 38;
+    constexpr int kEyeRightX = 90;
+    constexpr int kEyeY      = 33;
+    constexpr float kTiltMax = 0.24f; // eyeTilt = ±1 时约 ±14°
 
     int clampInt(int value, int lo, int hi)
     {
@@ -25,228 +20,210 @@ namespace
         return value;
     }
 
-    // drawSprite 以左上角为锚点绘制精灵，自动裁剪到屏幕内
-    void drawSprite(IDisplay &display, int x, int y, int w, int h, const uint8_t *data)
+    float clampf(float value, float lo, float hi)
     {
-        const int sx = clampInt(x, 0, 128 - w);
-        const int sy = clampInt(y, 0, 64 - h);
-        display.DrawXBMP(sx, sy, w, h, data);
+        if (value < lo)
+            return lo;
+        if (value > hi)
+            return hi;
+        return value;
     }
 
-    void drawSpriteCentered(IDisplay &display, int x, int y, int w, int h, const uint8_t *data)
+    // EyeGeom 是一只眼睛在局部坐标系里的形状
+    struct EyeGeom
     {
-        drawSprite(display, x - w / 2, y - h / 2, w, h, data);
+        float w;      // 半宽
+        float h;      // 半高
+        float invW;
+        float invH;
+        float cosA;
+        float sinA;
+        float slant;  // 上眼睑倾角
+        float squint; // 下眼睑上抬
+        float sign;   // 左眼 +1，右眼 -1（把“内端”统一到 +u）
+    };
+
+    // insideEye 判断局部坐标 (dx, dy) 是否落在眼白内
+    //
+    // 眼型是 |u/w|³ + |v/h|³ ≤ 1 的超椭圆，比正圆更像屏幕上的圆角眼；
+    // 上眼睑按倾角切一刀，下眼睑按 squint 做一条上抬的抛物线。
+    bool insideEye(const EyeGeom &geom, float dx, float dy)
+    {
+        const float u = geom.cosA * dx + geom.sinA * dy;
+        const float v = -geom.sinA * dx + geom.cosA * dy;
+
+        const float ax = fabsf(u) * geom.invW;
+        const float ay = fabsf(v) * geom.invH;
+        if (ax * ax * ax + ay * ay * ay > 1.0f)
+            return false;
+
+        const float lx  = u * geom.invW;
+        const float top = -geom.h + geom.slant * geom.h * 0.9f * lx * geom.sign;
+        if (v < top)
+            return false;
+
+        const float bottom = geom.h - geom.squint * geom.h * (1.0f - lx * lx);
+        return v <= bottom;
     }
 
-    // drawThickLine 用两条错开的线模拟 2px 笔画
-    void drawThickLine(IDisplay &display, int x0, int y0, int x1, int y1)
+    // fillHeart 用“两个圆瓣 + 下方收尖”画心形，size 为半宽
+    //
+    // 隐函数心形在 20 多像素宽时缺口只有 1~2px，顶部还会超出采样范围，
+    // 看起来像“上半矩形 + 下半尖角”；这里改用圆瓣和楔形拼出清晰的 V 形缺口。
+    void fillHeart(IDisplay &display, int cx, int cy, int size)
     {
-        display.DrawLine(x0, y0, x1, y1);
-        display.DrawLine(x0, y0 + 1, x1, y1 + 1);
-    }
+        constexpr float kLobeDx = 0.45f;   // 圆瓣中心横向偏移
+        constexpr float kLobeDy = -0.35f;  // 圆瓣中心纵向偏移（屏幕坐标向上为负）
+        constexpr float kLobeR2 = 0.2025f; // 圆瓣半径 0.45 的平方
 
-    void drawBrows(IDisplay &display, const FaceParams &params, int dx, int dy)
-    {
-        const int baseY = kEyeY - 15 - static_cast<int>(params.browLift * 4.0f) + dy;
-        const int tilt  = static_cast<int>(params.browAngle * 4.0f);
+        const float scale = static_cast<float>(size);
 
-        // 左眉：外端在左，外高内低表示生气，内高外低表示难过
-        drawThickLine(display, kEyeLeftX - 8 + dx, baseY + tilt, kEyeLeftX + 8 + dx, baseY - tilt);
-        drawThickLine(display, kEyeRightX - 8 + dx, baseY - tilt, kEyeRightX + 8 + dx, baseY + tilt);
-    }
-
-    void drawEye(IDisplay &display, int cx, int cy, const FaceParams &params, int dx, int dy)
-    {
-        const int x    = cx + dx;
-        const int y    = cy + dy;
-        const float open = params.eyeOpen;
-
-        if (params.eyeCross > 0.55f)
+        for (int y = -size; y <= size; y++)
         {
-            // × 眼：眩晕
-            drawThickLine(display, x - 9, y - 9, x + 9, y + 9);
-            drawThickLine(display, x + 9, y - 9, x - 9, y + 9);
-            return;
+            const float ny = static_cast<float>(y) / scale;
+
+            // 下方楔形：从两瓣之间一直收尖到底部
+            float wedge = 0.0f;
+            if (ny >= -0.15f && ny <= 0.95f)
+                wedge = 0.90f * (0.95f - ny) / 1.10f;
+
+            for (int x = -size; x <= size; x++)
+            {
+                const float nx = static_cast<float>(x) / scale;
+                const float dl = (nx + kLobeDx) * (nx + kLobeDx) + (ny - kLobeDy) * (ny - kLobeDy);
+                const float dr = (nx - kLobeDx) * (nx - kLobeDx) + (ny - kLobeDy) * (ny - kLobeDy);
+
+                if (dl <= kLobeR2 || dr <= kLobeR2 || fabsf(nx) <= wedge)
+                    display.DrawPixel(cx + x, cy + y);
+            }
         }
-
-        if (open < 0.18f)
-        {
-            // 闭眼：一条圆头短线
-            display.DrawRBox(x - 11, y - 2, 22, 4, 2);
-            return;
-        }
-
-        if (params.eyeRound > 0.62f && open > 0.45f)
-        {
-            // 弯月笑眼：三层同心上半圆弧
-            const int radius = 10;
-            display.DrawArc(x, y + 4, radius, 0, 128);
-            display.DrawArc(x, y + 4, radius - 1, 0, 128);
-            display.DrawArc(x, y + 4, radius - 2, 0, 128);
-            return;
-        }
-
-        // 圆眼：白色眼白 + 黑色瞳孔 + 白色高光
-        const int rx = 12;
-        const int ry = clampInt(static_cast<int>(13.0f * open), 2, 13);
-        display.DrawFilledEllipse(x, y, rx, ry);
-
-        // 眼白太扁时画瞳孔会挖穿眼白，直接跳过
-        if (open < 0.32f || ry < 4)
-            return;
-
-        int pupilR = clampInt(static_cast<int>(5.5f * params.pupilSize), 2, 7);
-        if (pupilR > ry - 1)
-            pupilR = ry - 1;
-        const int maxOffX = (rx - pupilR - 1) > 0 ? (rx - pupilR - 1) : 0;
-        const int maxOffY = (ry - pupilR - 1) > 0 ? (ry - pupilR - 1) : 0;
-        const int px      = x + static_cast<int>(params.pupilX * maxOffX);
-        const int py      = y + static_cast<int>(params.pupilY * maxOffY);
-
-        display.SetDrawColor(0);
-        display.DrawDisc(px, py, pupilR);
-        display.SetDrawColor(1);
-        display.DrawDisc(px - 2, py - 2, 1);
     }
 
-    void drawMouth(IDisplay &display, const FaceParams &params, int dx, int dy)
+    // drawSpiralEye 画一只眩晕螺旋眼
+    void drawSpiralEye(IDisplay &display, int cx, int cy, float radius, float timeSec, bool right)
     {
-        const int cx = kMouthX + dx;
-        const int cy = kMouthY + dy;
-        const int w  = static_cast<int>(15.0f * params.mouthWidth);
+        constexpr int kSegments = 24;
+        const float direction   = right ? -1.0f : 1.0f;
 
-        if (params.mouthOpen > 0.14f)
+        int prevX = cx;
+        int prevY = cy;
+        for (int i = 1; i <= kSegments; i++)
         {
-            // 张嘴：白色外圈 + 黑色口腔，形成清晰的“O”
-            const int ry = 2 + static_cast<int>(10.0f * params.mouthOpen);
-            display.DrawFilledEllipse(cx, cy, w, ry);
-            display.SetDrawColor(0);
-            display.DrawFilledEllipse(cx, cy, w - 2, ry - 2 > 0 ? ry - 2 : 1);
-            display.SetDrawColor(1);
-            return;
-        }
-
-        // 闭合嘴：二次贝塞尔曲线，curve 为正时嘴角上翘
-        const float curve = params.mouthCurve;
-        const int y0      = cy - static_cast<int>(3.0f * curve);
-        const int yc      = cy + static_cast<int>(9.0f * curve);
-        const int x0      = cx - w;
-        const int x1      = cx + w;
-
-        int prevX = x0;
-        int prevY = y0;
-        constexpr int kSteps = 12;
-        for (int i = 1; i <= kSteps; i++)
-        {
-            const float t  = static_cast<float>(i) / kSteps;
-            const float mt = 1.0f - t;
-            const int x    = static_cast<int>(mt * mt * x0 + 2.0f * mt * t * cx + t * t * x1);
-            const int y    = static_cast<int>(mt * mt * y0 + 2.0f * mt * t * yc + t * t * y0);
-            drawThickLine(display, prevX, prevY, x, y);
+            const float u     = static_cast<float>(i) / kSegments;
+            const float angle = timeSec * 5.5f * direction + u * 13.0f;
+            const float rad   = radius * u;
+            const int x       = cx + static_cast<int>(lroundf(rad * cosf(angle)));
+            const int y       = cy + static_cast<int>(lroundf(rad * sinf(angle)));
+            display.DrawLine(prevX, prevY, x, y);
             prevX = x;
             prevY = y;
         }
     }
 
-    void drawBlush(IDisplay &display, const FaceParams &params, int dx, int dy)
+    // drawHeartEye 画心形眼：整只眼睛变成一颗会跳动的心
+    void drawHeartEye(IDisplay &display, int x, int y, float h, float timeSec, bool right)
     {
-        if (params.blush <= 0.05f)
+        // 两颗心错开半拍跳动，比整张脸一起缩放更俏皮
+        const float phase = right ? 0.0f : 0.6f;
+        const float beat  = 1.0f + 0.07f * sinf(timeSec * 2.0f * 3.14159265f * 1.05f + phase);
+        const int size    = clampInt(static_cast<int>(lroundf(h * 0.98f * beat)), 3, 16);
+
+        fillHeart(display, x, y - 1, size);
+    }
+
+    // drawRoundEye 画一只带眼皮的圆角眼
+    void drawRoundEye(IDisplay &display, int x, int y, float w, float h, float pupilX, const FaceParams &params,
+                      bool right)
+    {
+        const float angle = params.eyeTilt * kTiltMax;
+
+        EyeGeom geom;
+        geom.w      = w;
+        geom.h      = h;
+        geom.invW   = 1.0f / w;
+        geom.invH   = 1.0f / h;
+        geom.cosA   = cosf(angle);
+        geom.sinA   = sinf(angle);
+        geom.slant  = params.lidSlant;
+        geom.squint = clampf(params.lidSquint + (right ? fmaxf(params.eyeWink, 0.0f) : fmaxf(-params.eyeWink, 0.0f)),
+                             0.0f, 1.0f);
+        geom.sign   = right ? -1.0f : 1.0f;
+
+        // 旋转后的包围盒
+        const int bx = static_cast<int>(w * fabsf(geom.cosA) + h * fabsf(geom.sinA)) + 2;
+        const int by = static_cast<int>(w * fabsf(geom.sinA) + h * fabsf(geom.cosA)) + 2;
+
+        for (int iy = -by; iy <= by; iy++)
+        {
+            for (int ix = -bx; ix <= bx; ix++)
+            {
+                if (insideEye(geom, static_cast<float>(ix), static_cast<float>(iy)))
+                    display.DrawPixel(x + ix, y + iy);
+            }
+        }
+
+        // 瞳孔：大小随情绪缩放，位置跟视线偏移；黑盘越界时会自然融进背景。
+        // 眼睛压到很窄时（眨眼收尾）不画瞳孔，免得把眼白整个涂黑。
+        if (h < 4.0f)
             return;
 
-        const int level  = params.blush > 0.66f ? 2 : (params.blush > 0.33f ? 1 : 0);
-        const int centers[2] = {26 + dx, 102 + dx};
-        const int cy          = 43 + dy;
+        int pupilR     = clampInt(static_cast<int>(lroundf(0.46f * fminf(w, h) * params.pupilSize)), 2, 11);
+        const int maxX = clampInt(static_cast<int>(w) - pupilR - 2, 0, 64);
+        const int maxY = clampInt(static_cast<int>(h) - pupilR - 1, 0, 64);
+        const int px   = x + static_cast<int>(lroundf(pupilX * static_cast<float>(maxX)));
+        const int py   = y + static_cast<int>(lroundf(params.pupilY * static_cast<float>(maxY)));
 
-        for (int c = 0; c < 2; c++)
+        display.SetDrawColor(0);
+        display.DrawDisc(px, py, pupilR);
+        display.SetDrawColor(1);
+
+        // 高光只在眼白内部绘制，避免眼皮切掉后留下悬空的白点
+        const int gx = px - pupilR / 2;
+        const int gy = py - pupilR / 2;
+        if (insideEye(geom, static_cast<float>(gx - x), static_cast<float>(gy - y)))
+            display.DrawDisc(gx, gy, pupilR >= 6 ? 2 : 1);
+
+        const int sx = px + pupilR / 2;
+        const int sy = py + pupilR / 2;
+        if (insideEye(geom, static_cast<float>(sx - x), static_cast<float>(sy - y)))
+            display.DrawPixel(sx, sy);
+    }
+
+    void drawEye(IDisplay &display, int cx, int cy, const FaceState &state, int dx, int dy, bool right)
+    {
+        const FaceParams &params = state.params;
+
+        // 左右眼轻微不对称：一只更大、略高，好奇时尤其明显
+        const float asym = params.eyeAsym;
+        const float wink = right ? fmaxf(params.eyeWink, 0.0f) : fmaxf(-params.eyeWink, 0.0f);
+        const float w    = params.eyeW * (1.0f + (right ? -0.06f : 0.06f) * asym) * (1.0f + 0.05f * wink);
+        const float h    = params.eyeH * (1.0f + (right ? -0.12f : 0.12f) * asym) * (1.0f - 0.30f * wink);
+        const int x      = cx + dx;
+        const int y      = cy + dy + static_cast<int>(lroundf((right ? 1.0f : -1.0f) * 2.0f * asym));
+
+        // 眨眼闭到底：一条圆头短线
+        if (h < 1.2f)
         {
-            for (int y = -3; y <= 3; y++)
-            {
-                for (int x = -7; x <= 7; x++)
-                {
-                    // 椭圆内 + 棋盘抖动，抖动密度表示浓度
-                    if ((x * x) / 49.0f + (y * y) / 9.0f > 1.0f)
-                        continue;
-                    const int pattern = (x + y + 16) & 3;
-                    if (level == 2 || (level == 1 && pattern < 2) || (level == 0 && pattern == 0))
-                        display.DrawPixel(centers[c] + x, cy + y);
-                }
-            }
-        }
-    }
-
-    void drawAngerMark(IDisplay &display, int cx, int cy, float timeSec)
-    {
-        // 脉动的四短线“怒气”符号
-        const float pulse = 0.65f + 0.35f * fabsf(sinf(timeSec * 7.0f));
-        const int out     = static_cast<int>(6.0f * pulse) + 2;
-        const int inner   = 2;
-
-        drawThickLine(display, cx - inner, cy - inner, cx - out, cy - out);
-        drawThickLine(display, cx + inner, cy - inner, cx + out, cy - out);
-        drawThickLine(display, cx - inner, cy + inner, cx - out, cy + out);
-        drawThickLine(display, cx + inner, cy + inner, cx + out, cy + out);
-    }
-
-    void drawDecorations(IDisplay &display, const FaceState &state, int dx, int dy)
-    {
-        switch (state.expression)
-        {
-        case EmojiId::Angry:
-            drawAngerMark(display, 106 + dx, 11 + dy, state.timeSec);
-            break;
-        case EmojiId::Curious: {
-            const int bob = static_cast<int>(2.0f * sinf(state.timeSec * 3.0f));
-            display.SetFont(u8g2_font_6x10_tr);
-            display.DrawStr(100 + dx, 17 + dy + bob, "?");
-            break;
-        }
-        case EmojiId::Dizzy: {
-            // 三颗星绕头顶旋转
-            for (int i = 0; i < 3; i++)
-            {
-                const float angle = state.timeSec * 2.4f + static_cast<float>(i) * 2.094f;
-                const int x       = 64 + static_cast<int>(40.0f * cosf(angle)) + dx;
-                const int y       = 12 + static_cast<int>(7.0f * sinf(angle)) + dy / 2;
-                drawSpriteCentered(display, x, y, 7, 6, kStar);
-            }
-            break;
-        }
-        default:
-            break;
-        }
-    }
-
-    void drawParticle(IDisplay &display, const FaceParticle &particle, float timeSec)
-    {
-        if (particle.life <= 0.0f)
+            const int halfW = clampInt(static_cast<int>(lroundf(w * 0.85f)), 4, 18);
+            display.DrawRBox(x - halfW, y - 1, halfW * 2 + 1, 3, 1);
             return;
+        }
 
-        const int x = static_cast<int>(particle.x + sinf(particle.phase + timeSec * 3.0f) * 3.0f);
-        const int y = static_cast<int>(particle.y);
-
-        switch (particle.kind)
+        if (params.eyeCross > 0.55f)
         {
-        case ParticleKind::Heart:
-            drawSpriteCentered(display, x, y, 7, 6, kHeart);
-            break;
-        case ParticleKind::Tear:
-            drawSpriteCentered(display, x, y, 5, 7, kTear);
-            break;
-        case ParticleKind::Sweat:
-            drawSpriteCentered(display, x, y, 5, 6, kSweat);
-            break;
-        case ParticleKind::Sparkle: {
-            const int r = static_cast<int>(2.0f + 2.0f * particle.scale);
-            display.DrawLine(x - r, y, x + r, y);
-            display.DrawLine(x, y - r, x, y + r);
-            if (r >= 3)
-            {
-                display.DrawLine(x - 1, y - 1, x + 1, y + 1);
-                display.DrawLine(x + 1, y - 1, x - 1, y + 1);
-            }
-            break;
+            drawSpiralEye(display, x, y, fminf(w, h) * 0.95f, state.timeSec, right);
+            return;
         }
+
+        if (params.eyeHeart > 0.55f)
+        {
+            drawHeartEye(display, x, y, h, state.timeSec, right);
+            return;
         }
+
+        // 对眼：左眼瞳孔向右、右眼向左，困惑时两只眼睛一起“对”到鼻梁
+        const float pupilX = clampf(params.pupilX + (right ? -params.pupilCross : params.pupilCross), -1.0f, 1.0f);
+        drawRoundEye(display, x, y, w, h, pupilX, params, right);
     }
 
 } // namespace
@@ -258,13 +235,6 @@ void FacePainter::Paint(IDisplay &display, const FaceState &state) const
     const int dx = static_cast<int>(lroundf(state.params.faceX));
     const int dy = static_cast<int>(lroundf(state.params.faceY));
 
-    drawBrows(display, state.params, dx, dy);
-    drawEye(display, kEyeLeftX, kEyeY, state.params, dx, dy);
-    drawEye(display, kEyeRightX, kEyeY, state.params, dx, dy);
-    drawBlush(display, state.params, dx, dy);
-    drawMouth(display, state.params, dx, dy);
-    drawDecorations(display, state, dx, dy);
-
-    for (uint8_t i = 0; i < state.particleCount; i++)
-        drawParticle(display, state.particles[i], state.timeSec);
+    drawEye(display, kEyeLeftX, kEyeY, state, dx, dy, false);
+    drawEye(display, kEyeRightX, kEyeY, state, dx, dy, true);
 }

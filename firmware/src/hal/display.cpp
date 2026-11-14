@@ -48,7 +48,7 @@ void U8g2Display::ClearBuffer()
 // SendBuffer 只把发生变化的 8×8 图块矩形发给屏幕
 //
 // 整屏 1KB 走 400kHz I2C 约 23ms，按 30fps 刷新会吃掉大半主循环；
-// 表情动画通常只改动眼睛/嘴附近的图块，因此先做图块级差分，再用
+// 表情动画通常只改动眼睛附近的图块，因此先做图块级差分，再用
 // U8g2 的 updateDisplayArea 只发变化区域。
 void U8g2Display::SendBuffer()
 {
@@ -128,6 +128,11 @@ void U8g2Display::Print(const char *text)
     _u8g2.print(text);
 }
 
+int U8g2Display::StrWidth(const char *text)
+{
+    return static_cast<int>(_u8g2.getStrWidth(text));
+}
+
 void U8g2Display::DrawXBMP(int x, int y, int w, int h, const uint8_t *bitmap)
 {
     _u8g2.drawXBMP(x, y, w, h, bitmap);
@@ -156,6 +161,11 @@ void U8g2Display::DrawRBox(int x, int y, int w, int h, int r)
 void U8g2Display::DrawFrame(int x, int y, int w, int h)
 {
     _u8g2.drawFrame(x, y, w, h);
+}
+
+void U8g2Display::DrawRFrame(int x, int y, int w, int h, int r)
+{
+    _u8g2.drawRFrame(x, y, w, h, r);
 }
 
 void U8g2Display::DrawCircle(int x, int y, int r)

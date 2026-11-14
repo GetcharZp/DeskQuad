@@ -15,6 +15,7 @@
 
 #include <deskquad/agent/agent_types.h>
 #include <deskquad/agent/deepseek_agent.h>
+#include <deskquad/app/interaction_status.h>
 #include <deskquad/emotion/emotion_engine.h>
 #include <deskquad/emotion/multimodal_fusion.h>
 #include <deskquad/hal/speaker.h>
@@ -61,6 +62,9 @@ public:
 
     // Snapshot 读取当前请求状态
     AgentSnapshot Snapshot();
+
+    // Activity 返回是否有 AI 请求在排队或处理，用于屏幕状态提示
+    InteractionKind Activity();
 
     // IsReady 返回上游 LLM 是否已配置
     bool IsReady() const;

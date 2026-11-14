@@ -100,7 +100,7 @@ public:
 
     // CurrentNoteFreq 返回当前音符频率，静音或休止符返回 0
     //
-    // 表情渲染用它驱动嘴型开合：音高越高，嘴动得越快。
+    // 表情渲染用它驱动眼睛弹跳：音高越高，跳得越快。
     uint16_t CurrentNoteFreq() const;
 
     // 设置静音

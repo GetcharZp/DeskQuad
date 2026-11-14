@@ -235,6 +235,21 @@ uint16_t VoiceService::LevelHz() const
     return static_cast<uint16_t>(150 + static_cast<uint16_t>(_level) * 8);
 }
 
+InteractionKind VoiceService::Activity() const
+{
+    switch (_state)
+    {
+    case State::Listening:
+        return InteractionKind::Listening;
+    case State::Thinking:
+        return InteractionKind::Thinking;
+    case State::Speaking:
+        return InteractionKind::Speaking;
+    default:
+        return InteractionKind::None;
+    }
+}
+
 const char *VoiceService::Status() const
 {
     switch (_state)

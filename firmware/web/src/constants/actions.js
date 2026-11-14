@@ -19,7 +19,7 @@ export const expressionActions = [
   { id: 'love', label: '喜欢' },
   { id: 'error', label: '错误' },
   { id: 'dizzy', label: '晕' },
-  { id: 'logo', label: 'DeskQuad LOGO' },
+  { id: 'logo', label: 'LOGO' },
 ];
 
 export const networkActions = [

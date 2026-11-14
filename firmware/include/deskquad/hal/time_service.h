@@ -10,6 +10,21 @@
 
 #include <deskquad/config/app_config.h>
 
+// ClockReading 是一次时间读取的快照
+//
+// 显示层只需要这一组字段：时间页把 hour/minute 画成大号数字，
+// second 驱动秒进度与冒号闪烁，month/day/weekday 组成日期行。
+struct ClockReading
+{
+    uint8_t hour;    // 0..23
+    uint8_t minute;  // 0..59
+    uint8_t second;  // 0..59
+    uint8_t month;   // 1..12
+    uint8_t day;     // 1..31
+    uint8_t weekday; // 0 = 周日
+    bool synced;     // 是否已经从 NTP 取得有效时间
+};
+
 // TimeService 提供网络时间
 class TimeService
 {
@@ -24,13 +39,8 @@ public:
     // Begin 启动 SNTP 同步，需要在联网之后调用
     void Begin();
 
-    // Format 把时间格式化为 "H:MM"
-    //
-    // # Params:
-    //
-    //	out: 输出缓冲
-    //	size: 缓冲长度，至少 8 字节
-    void Format(char *out, size_t size) const;
+    // Now 读取当前本地时间
+    ClockReading Now() const;
 
 private:
     const deskquad::Config &_config;

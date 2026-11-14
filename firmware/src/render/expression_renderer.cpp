@@ -9,13 +9,10 @@ namespace
     // 因此即使静止画面也按这个节拍调用也不会产生额外 I2C 流量。
     constexpr unsigned long kFrameMs = 33;
 
-    // Logo 是 128×64 的全屏位图
-    constexpr uint8_t kLogoY = 0;
-
 } // namespace
 
 ExpressionRenderer::ExpressionRenderer(IDisplay &display, const WeatherView &weatherView, const ClockView &clockView)
-    : _display(display), _weatherView(weatherView), _clockView(clockView), _current(EmojiId::Happy), _lastFrameMs(0)
+    : _display(display), _weatherView(weatherView), _clockView(clockView), _current(EmojiId::Clock), _lastFrameMs(0)
 {
 }
 
@@ -23,7 +20,6 @@ void ExpressionRenderer::Begin()
 {
     _display.Clear();
     _face.Begin(millis());
-    _face.SetExpression(_current);
     _lastFrameMs = millis() - kFrameMs;
 }
 
@@ -37,47 +33,45 @@ void ExpressionRenderer::SetEmoji(EmojiId id)
         _face.SetExpression(id);
 }
 
-void ExpressionRenderer::drawBitmapPage(const uint8_t *data, uint8_t width, uint8_t height, uint8_t y) const
-{
-    _display.FirstPage();
-    _display.SetDrawColor(1);
-    _display.DrawXBMP(0, y, width, height, data);
-    _display.NextPage();
-}
-
-void ExpressionRenderer::renderFace()
-{
-    _display.ClearBuffer();
-    _painter.Paint(_display, _face.State());
-    _display.SendBuffer();
-}
-
 void ExpressionRenderer::Render(const WeatherData &weather, const TimeService &timeService, bool wifiConnected,
-                                const FaceInputs &inputs)
+                                const FaceInputs &inputs, const InteractionStatus &status, bool force)
 {
     // 输入每帧都更新，即使这一帧因为节流不绘制
     _face.SetInputs(inputs);
 
     const unsigned long now = millis();
-    if (now - _lastFrameMs < kFrameMs)
+    if (!force && now - _lastFrameMs < kFrameMs)
         return;
     _lastFrameMs = now;
+
+    // Logo 是全屏位图，不叠加任何状态提示
+    if (_current == EmojiId::Logo)
+    {
+        _display.FirstPage();
+        do
+        {
+            _display.SetDrawColor(1);
+            _display.DrawXBMP(0, 0, 128, 64, logo);
+        } while (_display.NextPage());
+        return;
+    }
+
+    _display.ClearBuffer();
 
     switch (_current)
     {
     case EmojiId::Weather:
-        _weatherView.Render(_display, weather, wifiConnected);
-        return;
+        _weatherView.Draw(_display, weather, wifiConnected);
+        break;
     case EmojiId::Clock:
-        _clockView.Render(_display, timeService, wifiConnected);
-        return;
-    case EmojiId::Logo:
-        drawBitmapPage(logo, 128, 64, kLogoY);
-        return;
+        _clockView.Draw(_display, timeService, wifiConnected);
+        break;
     default:
+        _face.Update(now);
+        _painter.Paint(_display, _face.State());
         break;
     }
 
-    _face.Update(now);
-    renderFace();
+    _overlay.Paint(_display, status, static_cast<uint32_t>(now));
+    _display.SendBuffer();
 }
