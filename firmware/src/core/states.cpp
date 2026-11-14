@@ -2,7 +2,7 @@
 
 ActionDecision DecideAction(int raw)
 {
-    ActionDecision decision{ActionDecision::Kind::None, ActionId::None, ACTION_NONE};
+    ActionDecision decision{ActionDecision::Kind::None, ActionId::None, ACTION_NONE, EmojiId::Happy};
     if (raw >= static_cast<int>(ACTION_DANCE) && raw <= static_cast<int>(ACTION_HIDE_FACE))
     {
         decision.kind    = ActionDecision::Kind::Emotion;
@@ -12,6 +12,22 @@ ActionDecision DecideAction(int raw)
     {
         decision.kind = ActionDecision::Kind::Pose;
         decision.pose = static_cast<ActionId>(raw);
+    }
+    else if (raw >= static_cast<int>(ACTION_SHOW_CLOCK) && raw <= static_cast<int>(ACTION_SHOW_LOGO))
+    {
+        decision.kind = ActionDecision::Kind::Page;
+        switch (static_cast<PageAction>(raw))
+        {
+        case ACTION_SHOW_CLOCK:
+            decision.page = EmojiId::Clock;
+            break;
+        case ACTION_SHOW_WEATHER:
+            decision.page = EmojiId::Weather;
+            break;
+        case ACTION_SHOW_LOGO:
+            decision.page = EmojiId::Logo;
+            break;
+        }
     }
     return decision;
 }

@@ -6,13 +6,17 @@
 #define DEEPSEEK_API_PATH      "/chat/completions"
 #define DEEPSEEK_DEFAULT_MODEL "deepseek-flash"
 
-#define AGENT_HTTP_TIMEOUT 8000 // 单次 HTTP 请求超时 (ms)
-#define AGENT_COOLDOWN_MS  500  // 两次请求的最小间隔 (ms)
-#define AGENT_MAX_RETRIES  1    // 仅对网络错误与 5xx 重试；4xx 是配置问题，重试无意义
-#define AGENT_RETRY_DELAY  500  // 重试前的等待时间 (ms)
+#define AGENT_HTTP_TIMEOUT  8000 // 单次 HTTP 请求超时 (ms)
+#define AGENT_COOLDOWN_MS   500  // 两次请求的最小间隔 (ms)
+#define AGENT_MAX_RETRIES   1    // 仅对网络错误与 5xx 重试；4xx 是配置问题，重试无意义
+#define AGENT_RETRY_DELAY   500  // 重试前的等待时间 (ms)
+#define AGENT_PARSE_RETRIES 1    // 回复内容不是 JSON 时的整轮重试次数
 
-#define AGENT_MAX_TOKENS    512  // 回复 token 上限
-#define AGENT_MAX_HISTORY   3    // 保留的对话轮数
-#define AGENT_MAX_USER_LEN  100  // 历史中 user 文本的截断长度
-#define AGENT_MAX_REPLY_LEN 200  // 历史中 reply_text 的截断长度
-#define AGENT_REQ_BUF_SIZE  8192 // 请求 JSON 缓冲区
+// 思考模式与正文共享这份预算：预算被思考耗尽时上游会返回空白 content，
+// 因此不能给得太紧；模型正常输出 JSON 时会在 stop 处提前结束，不会多花时间。
+#define AGENT_MAX_TOKENS       1024 // 回复 token 上限
+#define AGENT_RETRY_MAX_TOKENS 1536 // 格式重试时进一步放宽，避开预算耗尽
+#define AGENT_MAX_HISTORY      3    // 保留的对话轮数
+#define AGENT_MAX_USER_LEN     100  // 历史中 user 文本的截断长度
+#define AGENT_MAX_REPLY_LEN    200  // 历史中 reply_text 的截断长度
+#define AGENT_REQ_BUF_SIZE     8192 // 请求 JSON 缓冲区

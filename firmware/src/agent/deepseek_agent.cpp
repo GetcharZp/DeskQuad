@@ -68,7 +68,7 @@ void DeepSeekAgent::configure(const String &apiKey, const String &model, const S
 }
 
 // 构建请求体
-bool DeepSeekAgent::buildRequestBody(const String &prompt)
+bool DeepSeekAgent::buildRequestBody(const String &prompt, bool strict)
 {
     // JsonDocument 按需在堆上增长，不必预估系统提示词与历史消息的体积
     JsonDocument doc;
@@ -94,9 +94,17 @@ bool DeepSeekAgent::buildRequestBody(const String &prompt)
     }
 
     // 3. 当前用户输入 (含情感上下文)
+    // 格式重试时在末尾追加一条更硬的约束：模型偶尔会无视 response_format，
+    // 把一句普通文本或空白当成回复。
+    String userContent = prompt;
+    if (strict)
+    {
+        userContent += "\n\n（上一次回复不是合法 json。本次只输出一个 json 对象，不要解释、不要 Markdown。）";
+    }
+
     JsonObject curMsg = messages.add<JsonObject>();
     curMsg["role"]    = "user";
-    curMsg["content"] = prompt;
+    curMsg["content"] = userContent;
 
     // --- model ---
     doc["model"] = _model;
@@ -112,8 +120,8 @@ bool DeepSeekAgent::buildRequestBody(const String &prompt)
     doc["response_format"]["type"] = "json_object";
 
     // --- temperature / max_tokens ---
-    doc["temperature"] = 0.7;
-    doc["max_tokens"]  = AGENT_MAX_TOKENS;
+    doc["temperature"] = strict ? 0.2f : 0.7f;
+    doc["max_tokens"]  = strict ? AGENT_RETRY_MAX_TOKENS : AGENT_MAX_TOKENS;
 
     // 先量体积再序列化，避免把截断后的半个 JSON 发给上游
     const size_t need = measureJson(doc);
@@ -202,22 +210,43 @@ bool DeepSeekAgent::parseApiResponse(const char *json, AgentResponse &response)
         return false;
     }
 
-    const char *content = apiDoc["choices"][0]["message"]["content"] | "";
-    if (content[0] == '\0')
-    {
-        const char *finishReason = apiDoc["choices"][0]["finish_reason"] | "unknown";
-        Serial.printf("[sys] agent: empty content (finish_reason=%s)\n", finishReason);
-        _lastError = String("AI 未返回内容 (finish_reason=") + finishReason + ")";
-        return false;
-    }
+    const char *content        = apiDoc["choices"][0]["message"]["content"] | "";
+    const char *finishReason   = apiDoc["choices"][0]["finish_reason"] | "unknown";
+    const char *reasoning      = apiDoc["choices"][0]["message"]["reasoning_content"] | "";
+    const int completionTokens = apiDoc["usage"]["completion_tokens"] | -1;
+
+    // 上游偶尔只返回一个空格或换行；统一先去掉首尾空白再判断
+    String text(content);
+    text.trim();
 
     // 模型偶尔会把 JSON 包在 Markdown 代码块里，截取最外层 {...}
-    const char *start = strchr(content, '{');
-    const char *end   = strrchr(content, '}');
+    const char *start = strchr(text.c_str(), '{');
+    const char *end   = strrchr(text.c_str(), '}');
     if (start == nullptr || end == nullptr || end <= start)
     {
-        Serial.printf("[sys] agent: no json object in content: %s\n", content);
-        _lastError = "AI 回复缺少 JSON 对象";
+        // 模型无视 JSON 约束、直接说了一句人话：按纯文本回复处理。
+        // 只说人话时对话还能继续，比整轮失败、播一句错误提示自然得多。
+        const bool looksLikeJson = text.startsWith("{") || text.startsWith("[") || text.startsWith("```");
+        if (text.length() > 0 && !looksLikeJson)
+        {
+            Serial.printf("[warn] agent: non-json reply, used as plain text: %s\n", text.c_str());
+            response.reply_text = text.substring(0, AGENT_MAX_REPLY_LEN);
+            response.action     = 0;
+            response.expression = -1;
+            response.melody     = -1;
+            response.repeat     = 1;
+            response.emotion    = 0;
+            return true;
+        }
+
+        // 空白或截断的 JSON：记下上游线索，交给 ask() 决定是否重试。
+        // reasoning 字节数不为 0 说明思考模式并没有真正关闭；
+        // completion_tokens 顶到上限说明正文预算被耗尽。
+        Serial.printf("[warn] agent: unusable content (finish_reason=%s, completion_tokens=%d, content=%u B, "
+                      "reasoning=%u B)\n",
+                      finishReason, completionTokens, static_cast<unsigned>(text.length()),
+                      static_cast<unsigned>(strlen(reasoning)));
+        _lastError = String("AI 回复缺少 JSON 对象 (finish_reason=") + finishReason + ")";
         return false;
     }
 
@@ -296,18 +325,36 @@ bool DeepSeekAgent::ask(const String &prompt, const String &historyText, AgentRe
         return false;
     }
 
-    // 失败时 buildRequestBody 自己写入 _lastError
-    if (!buildRequestBody(prompt))
-        return false;
+    // 上游偶尔返回空白内容或纯文本。解析失败时换一组更保守的参数整轮重问一次：
+    // 温度更低、预算更宽，并追加一条更硬的 JSON 约束。
+    for (int attempt = 0; attempt <= AGENT_PARSE_RETRIES; attempt++)
+    {
+        const bool strict = attempt > 0;
 
-    String body;
-    if (!postRequest(body))
-        return false;
+        // 失败时 buildRequestBody 自己写入 _lastError
+        if (!buildRequestBody(prompt, strict))
+            return false;
 
-    if (!parseApiResponse(body.c_str(), response))
-        return false;
+        String body;
+        if (!postRequest(body))
+            return false; // 网络错误已经在 postRequest 内重试过
 
-    appendHistory(historyText, response.reply_text);
-    Serial.println("[sys] agent: API call completed successfully");
-    return true;
+        AgentResponse parsed{};
+        if (parseApiResponse(body.c_str(), parsed))
+        {
+            response   = parsed;
+            _lastError = "";
+            appendHistory(historyText, response.reply_text);
+            Serial.println("[sys] agent: API call completed successfully");
+            return true;
+        }
+
+        if (attempt < AGENT_PARSE_RETRIES)
+        {
+            Serial.printf("[warn] agent: reply not usable (%s), retrying with strict params\n", _lastError.c_str());
+            delay(AGENT_RETRY_DELAY);
+        }
+    }
+
+    return false;
 }

@@ -81,6 +81,17 @@ enum EmotionAction : uint8_t
     ACTION_HIDE_FACE = 18, // 捂脸/害羞
 };
 
+// PageAction 是系统页面切换编号，由 LLM 的 action 字段 19-21 触发
+//
+// 这些页面不是表情：表情编号 7-9 恰好也是同样的页面，但提示词约定
+// expression 只用 0-6，页面切换一律走 action。
+enum PageAction : uint8_t
+{
+    ACTION_SHOW_CLOCK   = 19, // 时间页
+    ACTION_SHOW_WEATHER = 20, // 天气页
+    ACTION_SHOW_LOGO    = 21, // 开机 Logo 页
+};
+
 // Melody 是内置旋律的编号，与 LLM 的 melody 字段取值一致
 enum Melody : uint8_t
 {
@@ -104,17 +115,20 @@ struct ActionDecision
     {
         None,
         Pose,
-        Emotion
+        Emotion,
+        Page
     };
 
     Kind kind;             // 执行方式
     ActionId pose;         // kind == Pose 时有效
     EmotionAction emotion; // kind == Emotion 时有效
+    EmojiId page;          // kind == Page 时有效
 };
 
 // DecideAction 把 LLM 返回的 action 编号解析为执行决策
 //
-// 1-10 走姿态，11-18 走情感动作，其余（含 0 与越界值）不执行任何动作。
+// 1-10 走姿态，11-18 走情感动作，19-21 切换系统页面，
+// 其余（含 0 与越界值）不执行任何动作。
 ActionDecision DecideAction(int raw);
 
 // IsRunnablePose 判断编号是否为可执行的姿态动作

@@ -1,6 +1,6 @@
 // 校验 action 编号到执行方式的映射
 //
-// 1-10 走姿态，11-18 走情感动作，0 与越界值不执行任何动作。
+// 1-10 走姿态，11-18 走情感动作，19-21 切换系统页面，0 与越界值不执行任何动作。
 
 #include <unity.h>
 
@@ -29,9 +29,29 @@ static void test_emotion_range_maps_to_emotion()
     }
 }
 
+static void test_page_range_maps_to_page()
+{
+    const struct
+    {
+        int raw;
+        EmojiId page;
+    } cases[] = {
+        {19, EmojiId::Clock},
+        {20, EmojiId::Weather},
+        {21, EmojiId::Logo},
+    };
+
+    for (const auto &c : cases)
+    {
+        const ActionDecision decision = DecideAction(c.raw);
+        TEST_ASSERT_EQUAL(static_cast<int>(ActionDecision::Kind::Page), static_cast<int>(decision.kind));
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(c.page), static_cast<uint8_t>(decision.page));
+    }
+}
+
 static void test_out_of_range_is_ignored()
 {
-    const int outOfRange[] = {0, -1, 19, 100, -50};
+    const int outOfRange[] = {0, -1, 22, 100, -50};
     for (int raw : outOfRange)
     {
         const ActionDecision decision = DecideAction(raw);
@@ -52,6 +72,7 @@ int main(int, char **)
     UNITY_BEGIN();
     RUN_TEST(test_pose_range_maps_to_pose);
     RUN_TEST(test_emotion_range_maps_to_emotion);
+    RUN_TEST(test_page_range_maps_to_page);
     RUN_TEST(test_out_of_range_is_ignored);
     RUN_TEST(test_runnable_pose_bounds);
     return UNITY_END();

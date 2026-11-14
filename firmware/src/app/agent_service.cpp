@@ -225,6 +225,7 @@ void AgentService::dispatch(const AgentResponse &response)
                   response.action, response.expression, response.melody, response.repeat);
 
     const ActionDecision decision = DecideAction(response.action);
+    bool pageShown                = false;
     if (decision.kind == ActionDecision::Kind::Emotion)
     {
         _motion->TriggerEmotion(decision.emotion, max((uint8_t)1, response.repeat));
@@ -233,8 +234,14 @@ void AgentService::dispatch(const AgentResponse &response)
     {
         _motion->RequestPose(decision.pose);
     }
+    else if (decision.kind == ActionDecision::Kind::Page)
+    {
+        _renderer->SetEmoji(decision.page);
+        pageShown = true;
+    }
 
-    if (response.expression >= 0 && response.expression <= 9)
+    // 切页那一轮不应用 expression，否则模型顺手带上的表情会把页面立刻顶掉
+    if (!pageShown && response.expression >= 0 && response.expression <= 9)
     {
         _renderer->SetEmoji(static_cast<EmojiId>(response.expression));
     }

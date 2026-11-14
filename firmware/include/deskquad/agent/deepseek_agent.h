@@ -35,7 +35,9 @@ public:
     void clearHistory();
 
 private:
-    bool buildRequestBody(const String &prompt);
+    // strict 为 true 时是格式重试：温度更低、token 预算更宽，并在用户消息尾部
+    // 追加一条更硬的 JSON 约束。
+    bool buildRequestBody(const String &prompt, bool strict);
     bool postRequest(String &body);
     bool parseApiResponse(const char *json, AgentResponse &response);
     void appendHistory(const String &user, const String &assistant);
